@@ -36,7 +36,6 @@ welopenvpn/
 │   │   ├── preload.cjs
 │   │   ├── openvpn.cjs
 │   │   ├── network.cjs
-│   │   ├── firewall.cjs
 │   ├── src/
 │   │   ├── App.vue
 │   │   ├── api.ts
@@ -142,7 +141,7 @@ GET /api/v1/me/room-session
 | 5 | 12005 | 10.222.5.0/24 |
 | 6 | 12006 | 10.222.6.0/24 |
 
-OpenVPN 不下发默认网关和 DNS，普通上网流量继续走用户自己的宽带/Wi-Fi。
+OpenVPN 不下发默认路由和 DNS，普通上网流量继续走用户自己的宽带/Wi-Fi。
 
 ### 5.3 冲突虚拟网卡
 

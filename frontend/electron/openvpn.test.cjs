@@ -22,17 +22,16 @@ test('configures the TAP address statically instead of using DHCP emulation', ()
   assert.match(client, /'ip-win32 netsh'/)
   assert.match(client, /'dev-type tap'/)
   assert.doesNotMatch(client, /'dev tap'/)
-  assert.doesNotMatch(client, /'tun-mtu 1400'/)
-  assert.doesNotMatch(client, /'mssfix 1360'/)
-  assert.doesNotMatch(client, /clearArpCache/)
+  assert.doesNotMatch(client, /route-nopull/)
+  assert.doesNotMatch(client, /pull-filter ignore redirect-gateway/)
+  assert.doesNotMatch(client, /pull-filter ignore dhcp-option/)
 })
 
-test('pins limited broadcast traffic to the TAP interface after connect', () => {
+test('does not change routes or firewall rules while connecting', () => {
   const client = fs.readFileSync(path.join(__dirname, 'openvpn.cjs'), 'utf8')
-  assert.match(client, /LIMITED_BROADCAST_ROUTE = '255\.255\.255\.255'/)
-  assert.match(client, /route\.exe" add \$route mask 255\.255\.255\.255 0\.0\.0\.0 IF \$interfaceIndex metric 1/)
-  assert.match(client, /await addLimitedBroadcastRoute\(inspected\.interfaceIndex\)/)
-  assert.match(client, /await removeLimitedBroadcastRoute\(\)/)
+  assert.doesNotMatch(client, /route\.exe/)
+  assert.doesNotMatch(client, /ensureTapUdpFirewall/)
+  assert.doesNotMatch(client, /removeLegacyWe8BroadcastFirewall/)
 })
 
 test('keeps client and server cipher settings aligned', () => {
@@ -42,6 +41,13 @@ test('keeps client and server cipher settings aligned', () => {
   assert.match(generator, new RegExp(`cipher ${OPENVPN_FALLBACK_CIPHER}`))
   assert.match(generator, /setenv WEL_ROOM_ID \$\{room_id\}/)
   assert.match(generator, /setenv WEL_API_BASE_URL \$\{api_base\}/)
+})
+
+test('keeps the OpenVPN auth verifier aligned with the 10.222 room network', () => {
+  const verifier = fs.readFileSync(path.join(__dirname, '..', '..', 'deploy', 'openvpn', 'auth', 'verify-lease.sh'), 'utf8')
+  assert.match(verifier, /room_id.*\^\[1-6\]\$/)
+  assert.match(verifier, /\^10\\\.222\\\.\$\{room_id\}\\\./)
+  assert.doesNotMatch(verifier, /\^10\\\.80\\\./)
 })
 
 test('checks server certificate EKU without requiring missing key usage extension', () => {
@@ -114,11 +120,10 @@ test('opens the remembered TAP adapter by GUID to avoid localized names', () => 
   assert.match(client, /tapNode: enabledAdapter\.guid/)
   assert.doesNotMatch(client, /tapNode: adapter\.name/)
   assert.doesNotMatch(client, /runTapctl\(tapctl, \['create'/)
+  assert.doesNotMatch(client, /runTapctl\(tapctl, \['delete'/)
   assert.match(client, /ensureTapEnabled/)
-  assert.match(client, /ensureTapUdpFirewall\(enabledAdapter\.guid\)/)
   assert.match(client, /Win32_NetworkAdapter/)
   assert.match(client, /\.Enable\(\)/)
-  assert.match(client, /recreateWelTapAdapter/)
   assert.match(client, /tapGuid: enabledAdapter\.guid/)
   assert.match(client, /readRememberedTapGuid\(\)/)
   assert.match(client, /INSTALLER_TAP_STATE_PATH/)

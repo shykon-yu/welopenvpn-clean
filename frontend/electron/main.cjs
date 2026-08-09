@@ -5,7 +5,6 @@ const path = require('node:path')
 const { pathToFileURL } = require('node:url')
 const { version: appVersion } = require('../package.json')
 const { decodeProcessOutput, inspectVpnNetwork } = require('./network.cjs')
-const { ensureWe8BroadcastFirewall } = require('./firewall.cjs')
 const openvpn = require('./openvpn.cjs')
 
 if (process.platform === 'win32') {
@@ -133,16 +132,9 @@ ipcMain.handle('choose-game', async (event) => {
 ipcMain.handle('launch-game', (_event, gamePath) => {
   const executable = resolveGameExecutable(gamePath)
   return new Promise((resolve, reject) => {
-    Promise.resolve()
-      .then(() => ensureWe8BroadcastFirewall(executable))
-      .catch((error) => {
-        writeLog('配置 WE8 广播防火墙规则失败', error)
-      })
-      .finally(() => {
-        const child = spawn('cmd.exe', ['/d', '/c', 'start', '""', executable], { detached: true, windowsHide: true, stdio: 'ignore' })
-        child.once('error', reject)
-        child.once('spawn', () => { child.unref(); resolve() })
-      })
+    const child = spawn('cmd.exe', ['/d', '/c', 'start', '""', executable], { detached: true, windowsHide: true, stdio: 'ignore' })
+    child.once('error', reject)
+    child.once('spawn', () => { child.unref(); resolve() })
   })
 })
 

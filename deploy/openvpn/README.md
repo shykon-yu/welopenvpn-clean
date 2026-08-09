@@ -30,8 +30,9 @@ permissions, Go sessions, room capacity and heartbeat behavior unchanged.
    ports from this template.
 
 The client maps room 1 through 6 to UDP `12001` through `12006`. Each room uses
-its existing `10.222.<room>.0/24` subnet and does not push a default gateway or
-DNS server.
+its existing `10.222.<room>.0/24` subnet and does not push a default route or
+DNS server. The room gateway metadata required by TAP/server-bridge remains
+local to the room network.
 
 ## Release resources
 

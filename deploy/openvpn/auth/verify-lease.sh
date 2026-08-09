@@ -11,6 +11,7 @@ username=$(sed -n '1p' "$credential_file" | tr -d '\r')
 token=$(sed -n '2p' "$credential_file" | tr -d '\r')
 
 [[ "$username" =~ ^[A-Za-z0-9._-]{1,96}$ ]] || exit 1
+[[ "$room_id" =~ ^[1-6]$ ]] || exit 1
 [[ -n "$token" ]] || exit 1
 
 response=$(curl --fail --silent --show-error --max-time 5 \
@@ -24,7 +25,7 @@ printf '%s' "$response" | jq -e \
   >/dev/null
 
 virtual_ip=$(printf '%s' "$response" | jq -r '.lease.virtual_ip // empty')
-[[ "$virtual_ip" =~ ^10\.80\.[0-9]{1,3}\.[0-9]{1,3}$ ]] || exit 1
+[[ "$virtual_ip" =~ ^10\.222\.${room_id}\.[0-9]{1,3}$ ]] || exit 1
 
 ccd_dir="/run/welopenvpn/ccd/room-${room_id}"
 mkdir -p "$ccd_dir"

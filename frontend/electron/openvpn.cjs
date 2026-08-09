@@ -3,7 +3,6 @@ const os = require('node:os')
 const path = require('node:path')
 const { spawn } = require('node:child_process')
 const { inspectVpnNetwork, runPowerShell, waitForVpnNetwork } = require('./network.cjs')
-const { ensureTapUdpFirewall } = require('./firewall.cjs')
 
 const DEFAULT_HOST = '8.133.189.9'
 const DEFAULT_PORT = 12001
@@ -22,7 +21,6 @@ const TAP_STATE_PATH = path.join(APP_DATA_DIRECTORY, 'tap-adapter.json')
 const INSTALLER_TAP_STATE_PATH = path.join(process.env.PROGRAMDATA || 'C:\\ProgramData', 'WELPlatform', 'tap-create.txt')
 const MANAGEMENT_HOST = '127.0.0.1'
 const MANAGEMENT_STOP_TIMEOUT_MS = 3000
-const LIMITED_BROADCAST_ROUTE = '255.255.255.255'
 
 let connection = null
 
@@ -129,7 +127,6 @@ function rememberTapAdapter(adapter) {
 async function ensureTapReady(adapter) {
   const enabledAdapter = await ensureTapEnabled(adapter)
   rememberTapAdapter(enabledAdapter)
-  try { await ensureTapUdpFirewall(enabledAdapter.guid) } catch {}
   return { tapName: enabledAdapter.name, tapNode: enabledAdapter.guid, tapGuid: enabledAdapter.guid }
 }
 
@@ -319,9 +316,6 @@ function buildConfig({ host, port, username, token, roomID, subnetCidr, tapNode 
     `data-ciphers ${OPENVPN_DATA_CIPHERS}`,
     `data-ciphers-fallback ${OPENVPN_FALLBACK_CIPHER}`,
     `cipher ${OPENVPN_FALLBACK_CIPHER}`,
-    'route-nopull',
-    'pull-filter ignore redirect-gateway',
-    'pull-filter ignore dhcp-option',
     'verb 3',
     `log "${openVpnConfigPath(logPath)}"`,
     `setenv WEL_ROOM_ID ${roomID}`,
@@ -334,36 +328,6 @@ function buildConfig({ host, port, username, token, roomID, subnetCidr, tapNode 
 function removeFiles(files) {
   for (const file of files || []) {
     try { fs.rmSync(file, { force: true }) } catch { /* temporary credential cleanup */ }
-  }
-}
-
-async function addLimitedBroadcastRoute(interfaceIndex) {
-  if (process.platform !== 'win32') return false
-  const index = Number(interfaceIndex)
-  if (!Number.isInteger(index) || index <= 0) return false
-  try {
-    await runPowerShell(`
-$route = '${LIMITED_BROADCAST_ROUTE}'
-$interfaceIndex = ${index}
-& "$env:SystemRoot\\System32\\route.exe" delete $route 2>$null | Out-Null
-& "$env:SystemRoot\\System32\\route.exe" add $route mask 255.255.255.255 0.0.0.0 IF $interfaceIndex metric 1 | Out-Null
-if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-`, 6000)
-    return true
-  } catch {
-    return false
-  }
-}
-
-async function removeLimitedBroadcastRoute() {
-  if (process.platform !== 'win32') return
-  try {
-    await runPowerShell(`
-& "$env:SystemRoot\\System32\\route.exe" delete ${LIMITED_BROADCAST_ROUTE} 2>$null | Out-Null
-exit 0
-`, 4000)
-  } catch {
-    // Route cleanup is best effort; Windows also drops the route on reboot.
   }
 }
 
@@ -431,7 +395,6 @@ async function stopConnection() {
       try { current.process.kill() } catch {}
     }
   } finally {
-    await removeLimitedBroadcastRoute()
     removeFiles(current.temporaryFiles)
   }
 }
@@ -456,18 +419,6 @@ function wait(ms) {
 
 function isRetryableConnectError(error) {
   return /连接超时：未收到 OpenVPN 初始化完成信号|CreateFile failed on tap-windows6 device|Failed to open tap-windows6 adapter/i.test(String(error?.message || error || ''))
-}
-
-function isTapOpenError(error) {
-  return /CreateFile failed on tap-windows6 device|Failed to open tap-windows6 adapter/i.test(String(error?.message || error || ''))
-}
-
-async function recreateWelTapAdapter(prepared) {
-  if (process.platform !== 'win32' || !prepared?.tapGuid) return
-  const tapctl = locateTapctl()
-  if (!tapctl) return
-  try { await runTapctl(tapctl, ['delete', prepared.tapGuid], 20000) } catch {}
-  await wait(500)
 }
 
 async function stopStaleWelOpenVpnProcesses() {
@@ -522,17 +473,13 @@ async function connectAttempt({ executable, host, port, roomID, username, token,
         initialized = true
         const network = await waitForVpnNetwork(subnetCidr, 8000)
         if (!network.connected) throw new Error(`OpenVPN 已连接，但未获取 ${subnetCidr} 的虚拟 IP`)
-        const inspected = await inspectVpnNetwork(subnetCidr)
-        await addLimitedBroadcastRoute(inspected.interfaceIndex)
-        return inspected
+        return inspectVpnNetwork(subnetCidr)
       }
       if (OPENVPN_PROGRESS.test(liveOutput) || OPENVPN_PROGRESS.test(fileOutput)) {
         const network = await waitForVpnNetwork(subnetCidr, 8000)
         if (network.connected) {
           initialized = true
-          const inspected = await inspectVpnNetwork(subnetCidr)
-          await addLimitedBroadcastRoute(inspected.interfaceIndex)
-          return inspected
+          return inspectVpnNetwork(subnetCidr)
         }
       }
       await wait(300)
@@ -556,7 +503,7 @@ async function connect({ host, port, roomID, username, token, subnetCidr }) {
   await stopConnection()
   await stopStaleWelOpenVpnProcesses()
   await wait(500)
-  let prepared = await prepare()
+  const prepared = await prepare()
 
   let lastError = null
   for (let attempt = 1; attempt <= CONNECT_MAX_ATTEMPTS; attempt += 1) {
@@ -565,10 +512,6 @@ async function connect({ host, port, roomID, username, token, subnetCidr }) {
     } catch (error) {
       lastError = error
       if (attempt >= CONNECT_MAX_ATTEMPTS || !isRetryableConnectError(error)) throw error
-      if (isTapOpenError(error)) {
-        await recreateWelTapAdapter(prepared)
-        prepared = await prepare()
-      }
       await wait(attempt * 1200)
     }
   }
@@ -586,7 +529,6 @@ module.exports = {
   OPENVPN_REMOTE_CERT_EKU,
   TAP_NAME,
   connect,
-  addLimitedBroadcastRoute,
   isWelTapAdapter,
   isRetryableConnectError,
   openVpnConfigPath,
@@ -598,5 +540,4 @@ module.exports = {
   selectWelTapAdapter,
   status,
   stopConnection,
-  removeLimitedBroadcastRoute,
 }
