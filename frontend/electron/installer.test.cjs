@@ -22,8 +22,9 @@ test('bundles the OpenVPN runtime and installs the Win7-compatible TAP helper', 
   assert.doesNotMatch(installer, /TAPWINDOWS6ADAPTERS=0/)
   assert.doesNotMatch(installer, /ARPSYSTEMCOMPONENT=1/)
   assert.doesNotMatch(installer, /tap-windows-9\.24\.7-I601-Win7\.exe/)
-  assert.match(installer, /cleanup_previous_msi_done/)
-  assert.match(installer, /remove-wel-openvpn-msi\.ps1/)
+  assert.doesNotMatch(installer, /cleanup_previous_msi_done/)
+  assert.match(installer, /File \/oname=remove-wel-openvpn-msi\.ps1/)
+  assert.doesNotMatch(installer, /remove-wel-openvpn-msi\.ps1" -TapctlPath "\$INSTDIR\\resources\\openvpn\\bin\\tapctl\.exe"/)
   assert.doesNotMatch(installer, /Drivers\.Wintun|ADDLOCAL=[^\r\n]*OpenVPN,Drivers/)
   assert.match(installer, /resources\\openvpn\\bin\\openvpn\.exe/)
   assert.match(installer, /File \/oname=wel-tapctl\.exe/)
@@ -47,6 +48,13 @@ test('reuses one WEL adapter across upgrades and removes old WEL duplicates', ()
   assert.match(removeTap, /tap-create\.txt/)
   assert.match(removeTap, /delete \$rememberedGuid/)
   assert.match(removeTap, /& \$TapctlPath delete \$name/)
+})
+
+test('does not remove installed TAP adapters during upgrade installs', () => {
+  const installMacro = installer.slice(installer.indexOf('!macro customInstall'), installer.indexOf('!macro customUnInstall'))
+  assert.doesNotMatch(installMacro, /remove-wel-tap\.ps1" -TapctlPath/)
+  assert.doesNotMatch(installMacro, /remove-wel-openvpn-msi\.ps1" -TapctlPath/)
+  assert.doesNotMatch(installMacro, /tapctl\.exe" delete/)
 })
 
 test('keeps the Windows network connection name stable on Windows 7', () => {
