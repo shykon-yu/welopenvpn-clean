@@ -1,8 +1,6 @@
 const os = require('node:os')
 const { spawn } = require('node:child_process')
 
-const CONFLICTING_ADAPTER_PATTERN = /tap-windows|tap adapter|openvpn|zerotier|radmin vpn|hamachi|gateway nc adapter|vpn client adapter/i
-
 function decodeProcessOutput(chunks) {
   const buffer = Buffer.concat(chunks)
   const utf8 = buffer.toString('utf8')
@@ -126,14 +124,6 @@ function runProcess(file, args, timeoutMs = 5000) {
   })
 }
 
-function parseNetshInterfaces(output) {
-  return String(output || '').split(/\r?\n/).map((line) => {
-    const match = line.match(/^\s*(\d+)\s+(\d+)\s+\d+\s+\S+\s+(.+?)\s*$/)
-    if (!match) return null
-    return { interfaceIndex: Number(match[1]), interfaceMetric: Number(match[2]), name: match[3] }
-  }).filter(Boolean)
-}
-
 function parseTasklistPids(output) {
   const processNames = /^(WE8|PES8|dpnsvr)\.exe$/i
   return String(output || '').split(/\r?\n/).map((line) => {
@@ -151,13 +141,6 @@ function findNetstatLines(output, processes) {
     const fields = trimmed.split(/\s+/)
     return pidSet.has(fields.at(-1)) ? trimmed : null
   }).filter(Boolean)
-}
-
-async function queryNetshInterface(name) {
-  if (process.platform !== 'win32' || !name) return null
-  const netsh = `${process.env.SystemRoot || 'C:\\Windows'}\\System32\\netsh.exe`
-  const interfaces = parseNetshInterfaces(await runProcess(netsh, ['interface', 'ipv4', 'show', 'interfaces']))
-  return interfaces.find((item) => item.name.localeCompare(name, undefined, { sensitivity: 'accent' }) === 0) || null
 }
 
 async function queryWindowsAdapters() {
@@ -194,22 +177,6 @@ function analyzeNetwork(cidr, roomAddress, adapters) {
   const roomAdapter = actualIp
     ? adapters.find((adapter) => adapter.ipAddresses.includes(actualIp)) || null
     : null
-  const conflictingAdapterDetails = adapters
-    .filter((adapter) => adapter.ipEnabled && adapter !== roomAdapter && CONFLICTING_ADAPTER_PATTERN.test(adapter.description))
-  const conflictingAdapters = conflictingAdapterDetails.map((adapter) => adapter.description)
-  const conflictingAdapterIndexes = conflictingAdapterDetails
-    .filter((adapter) => adapter.interfaceMetric === null || adapter.interfaceMetric < 5000)
-    .map((adapter) => adapter.interfaceIndex)
-    .filter((interfaceIndex) => Number.isInteger(interfaceIndex) && interfaceIndex > 0)
-  const warnings = []
-
-  if (!actualIp) warnings.push(`尚未获取房间网段 ${cidr} 的虚拟 IP`)
-  if (roomAdapter?.defaultGateways.length) warnings.push(`VPN 网卡仍存在默认网关：${roomAdapter.defaultGateways.join(', ')}`)
-  if (roomAdapter?.dnsServers.length) warnings.push(`VPN 网卡仍存在 DNS：${roomAdapter.dnsServers.join(', ')}`)
-  if (roomAdapter && roomAdapter.interfaceMetric !== null && roomAdapter.interfaceMetric > 5) {
-    warnings.push(`VPN 网卡跃点较高：${roomAdapter.interfaceMetric}`)
-  }
-  if (conflictingAdapterIndexes.length) warnings.push(`检测到可能干扰 WE8 的虚拟网卡：${conflictingAdapters.join('、')}`)
 
   return {
     connected: Boolean(actualIp),
@@ -218,13 +185,7 @@ function analyzeNetwork(cidr, roomAddress, adapters) {
     adapterName: roomAddress?.name || null,
     adapterDescription: roomAdapter?.description || roomAddress?.name || null,
     interfaceIndex: roomAdapter?.interfaceIndex ?? null,
-    interfaceMetric: roomAdapter?.interfaceMetric ?? null,
-    defaultGateways: roomAdapter?.defaultGateways || [],
-    dnsServers: roomAdapter?.dnsServers || [],
     macAddress: roomAdapter?.macAddress || null,
-    conflictingAdapters,
-    conflictingAdapterIndexes,
-    warnings,
   }
 }
 
@@ -236,75 +197,7 @@ async function inspectVpnNetwork(cidr) {
   } catch {
     // The actual room IP is still reliable when WMI is unavailable.
   }
-  const network = analyzeNetwork(cidr, roomAddress, adapters)
-  if (!roomAddress || network.interfaceIndex !== null) return network
-
-  try {
-    const fallback = await queryNetshInterface(roomAddress.name)
-    if (!fallback) return network
-    return {
-      ...network,
-      interfaceIndex: fallback.interfaceIndex,
-      interfaceMetric: fallback.interfaceMetric,
-    }
-  } catch {
-    return network
-  }
-}
-
-function buildVpnPriorityScript(interfaceIndex, conflictingAdapterIndexes = []) {
-  const index = Number(interfaceIndex)
-  if (!Number.isInteger(index) || index <= 0) throw new Error('VPN 网卡接口编号无效')
-  const conflictingIndexes = [...new Set(conflictingAdapterIndexes.map(Number))]
-    .filter((candidate) => Number.isInteger(candidate) && candidate > 0 && candidate !== index)
-  const lowerConflictingMetrics = conflictingIndexes.map((candidate) => `
-& $netsh interface ipv4 set interface "interface=${candidate}" "metric=5000" "store=persistent" | Out-Null
-if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }`).join('')
-  return `
-$netsh = Join-Path $env:SystemRoot 'System32\\netsh.exe'
-& $netsh interface ipv4 set interface "interface=${index}" "metric=1" "store=persistent" | Out-Null
-if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-${lowerConflictingMetrics}
-`
-}
-
-async function runElevatedPowerShell(script, timeoutMs = 120000) {
-  const innerCommand = Buffer.from(script, 'utf16le').toString('base64')
-  const elevatedCommand = `
-$arguments = @('-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', '${innerCommand}')
-$process = Start-Process -FilePath 'powershell.exe' -ArgumentList $arguments -Verb RunAs -WindowStyle Hidden -Wait -PassThru
-if ($null -eq $process) { exit 1 }
-exit $process.ExitCode
-`
-  return runPowerShell(elevatedCommand, timeoutMs)
-}
-
-async function prioritizeVpnNetwork(cidr) {
-  const network = await inspectVpnNetwork(cidr)
-  if (!network.connected || network.interfaceIndex === null) return network
-  if (network.interfaceMetric === 1 && network.conflictingAdapterIndexes.length === 0) return network
-
-  try {
-    await runElevatedPowerShell(buildVpnPriorityScript(network.interfaceIndex, network.conflictingAdapterIndexes))
-    await new Promise((resolve) => setTimeout(resolve, 500))
-    return inspectVpnNetwork(cidr)
-  } catch {
-    return {
-      ...network,
-      warnings: [...network.warnings, '无法自动调整 VPN 网卡优先级，请同意管理员授权后重试'],
-    }
-  }
-}
-
-async function clearArpCache() {
-  if (process.platform !== 'win32') return false
-  const netsh = `${process.env.SystemRoot || 'C:\\Windows'}\\System32\\netsh.exe`
-  try {
-    await runProcess(netsh, ['interface', 'ip', 'delete', 'arpcache'], 5000)
-    return true
-  } catch {
-    return false
-  }
+  return analyzeNetwork(cidr, roomAddress, adapters)
 }
 
 async function waitForVpnNetwork(cidr, timeoutMs = 30000) {
@@ -319,17 +212,13 @@ async function waitForVpnNetwork(cidr, timeoutMs = 30000) {
 
 module.exports = {
   analyzeNetwork,
-  buildVpnPriorityScript,
-  clearArpCache,
   decodeProcessOutput,
   findNetstatLines,
   findRoomAddress,
   inspectVpnNetwork,
   isIPv4InCIDR,
   parseAdapterOutput,
-  parseNetshInterfaces,
   parseTasklistPids,
-  prioritizeVpnNetwork,
   runPowerShell,
   runProcess,
   waitForVpnNetwork,

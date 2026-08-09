@@ -1,6 +1,6 @@
 const test = require('node:test')
 const assert = require('node:assert/strict')
-const { analyzeNetwork, buildVpnPriorityScript, clearArpCache, findNetstatLines, findRoomAddress, isIPv4InCIDR, parseAdapterOutput, parseNetshInterfaces, parseTasklistPids } = require('./network.cjs')
+const { analyzeNetwork, findNetstatLines, findRoomAddress, isIPv4InCIDR, parseAdapterOutput, parseTasklistPids } = require('./network.cjs')
 
 test('matches only addresses in the room subnet', () => {
   assert.equal(isIPv4InCIDR('10.80.3.10', '10.80.3.0/24'), true)
@@ -16,7 +16,7 @@ test('finds the real room address from operating system interfaces', () => {
   assert.deepEqual(result, { name: 'VPN', address: '10.80.3.11' })
 })
 
-test('reports stale gateway and enabled conflicting adapters', () => {
+test('returns only the active room adapter details', () => {
   const status = analyzeNetwork('10.80.3.0/24', { name: 'VPN', address: '10.80.3.11' }, [
     {
       description: 'WEL TAP', ipEnabled: true,
@@ -41,10 +41,9 @@ test('reports stale gateway and enabled conflicting adapters', () => {
   assert.equal(status.connected, true)
   assert.equal(status.actualIp, '10.80.3.11')
   assert.equal(status.interfaceIndex, 18)
-  assert.equal(status.interfaceMetric, 25)
-  assert.deepEqual(status.conflictingAdapters, ['TAP-Windows Adapter V9', 'Gateway NC Adapter'])
-  assert.deepEqual(status.conflictingAdapterIndexes, [19, 20])
-  assert.equal(status.warnings.length, 4)
+  assert.equal(status.adapterName, 'VPN')
+  assert.equal(status.adapterDescription, 'WEL TAP')
+  assert.equal(status.macAddress, null)
 })
 
 test('parses base64 encoded PowerShell adapter fields', () => {
@@ -57,26 +56,6 @@ test('parses base64 encoded PowerShell adapter fields', () => {
   assert.equal(adapters[0].interfaceMetric, 25)
   assert.deepEqual(adapters[0].defaultGateways, [])
   assert.equal(adapters[0].macAddress, '00:FF:12:34:56:78')
-})
-
-test('parses interface index and metric from localized netsh output', () => {
-  const output = `Idx     Met         MTU          状态                名称\r\n---  ----------  ----------  ------------  ---------------------------\r\n 37           5        1500  connected     VPN - VPN Client\r\n  6          35        1500  connected     WLAN\r\n`
-  assert.deepEqual(parseNetshInterfaces(output), [
-    { interfaceIndex: 37, interfaceMetric: 5, name: 'VPN - VPN Client' },
-    { interfaceIndex: 6, interfaceMetric: 35, name: 'WLAN' },
-  ])
-})
-
-test('builds a Win7-compatible netsh command for the room adapter', () => {
-  const script = buildVpnPriorityScript(18, [19, 19, 20])
-  assert.match(script, /interface=18/)
-  assert.match(script, /metric=1/)
-  assert.match(script, /interface=19/)
-  assert.match(script, /interface=20/)
-  assert.match(script, /metric=5000/)
-  assert.equal((script.match(/interface=19/g) || []).length, 1)
-  assert.match(script, /store=persistent/)
-  assert.throws(() => buildVpnPriorityScript('invalid'), /接口编号无效/)
 })
 
 test('parses WE8 tasklist rows and matches netstat endpoints by PID', () => {
@@ -98,8 +77,4 @@ test('parses WE8 tasklist rows and matches netstat endpoints by PID', () => {
   assert.equal(endpoints.length, 2)
   assert.match(endpoints[0], /5739/)
   assert.match(endpoints[1], /ESTABLISHED/)
-})
-
-test('exports a best-effort ARP cache reset helper for Windows TAP reconnects', () => {
-  assert.equal(typeof clearArpCache, 'function')
 })

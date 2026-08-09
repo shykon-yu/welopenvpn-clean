@@ -431,11 +431,11 @@ onBeforeUnmount(() => {
         <div>
           <p class="eyebrow">联机准备</p>
           <h3>{{ connectionTitle }}</h3>
-          <span>{{ desktopStatus?.message ?? '正在检测 OpenVPN、TAP 与管理员权限' }}</span>
+          <span>{{ desktopStatus?.message ?? '正在准备联机组件' }}</span>
         </div>
         <div class="connection-actions">
           <span class="secure"><ShieldCheck :size="17" /> {{ desktopStatus?.ready ? '可联机' : '不可联机' }}</span>
-          <button class="secondary-button" @click="refreshDesktopStatus" :disabled="loading">重新检测</button>
+          <button class="secondary-button" @click="refreshDesktopStatus" :disabled="loading">刷新状态</button>
         </div>
       </section>
       <header class="topbar"><div><p class="eyebrow">游戏大厅</p><h2>选择一个对战房间</h2></div><div class="topbar-actions"><div class="online"><span></span>{{ totalOnline }} 人在线</div></div></header>

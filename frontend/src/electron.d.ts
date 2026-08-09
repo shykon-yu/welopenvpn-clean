@@ -14,13 +14,7 @@ export type DesktopLeaseStatus = {
   adapterName: string | null
   adapterDescription: string | null
   interfaceIndex: number | null
-  interfaceMetric: number | null
-  defaultGateways: string[]
-  dnsServers: string[]
   macAddress: string | null
-  conflictingAdapters: string[]
-  conflictingAdapterIndexes: number[]
-  warnings: string[]
   nicName?: string
 }
 

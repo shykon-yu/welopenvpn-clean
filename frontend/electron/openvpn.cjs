@@ -364,7 +364,7 @@ function status() {
     tapName: TAP_NAME,
     message: ready
       ? '联机组件已准备好'
-      : '未检测到 WEL 联机组件，请重新运行完整安装包并同意管理员授权。',
+      : '未检测到 WEL 联机组件，请重新运行完整安装包。',
   }
 }
 

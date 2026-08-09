@@ -95,6 +95,19 @@ cleanup_gui_done:
   FileOpen $4 "$PLUGINSDIR\tap-before.txt" w
   FileWrite $4 "$3"
   FileClose $4
+  Goto ensure_existing_tap
+
+ensure_existing_tap:
+  IfFileExists "$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe" 0 ensure_existing_tap_system32
+  nsExec::ExecToLog '"$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "$PLUGINSDIR\ensure-wel-tap.ps1" -TapctlPath "$INSTDIR\resources\openvpn\bin\tapctl.exe"'
+  Pop $2
+  Goto ensure_existing_tap_result
+ensure_existing_tap_system32:
+  nsExec::ExecToLog '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "$PLUGINSDIR\ensure-wel-tap.ps1" -TapctlPath "$INSTDIR\resources\openvpn\bin\tapctl.exe"'
+  Pop $2
+ensure_existing_tap_result:
+  StrCmp $2 "0" tap_ready
+  StrCmp $2 "3" install_tap_driver
   Goto install_tap_driver
 
 install_tap_driver:
@@ -119,8 +132,14 @@ remember_tap_system32:
   Pop $2
 remember_tap_result:
   StrCmp $2 "0" tap_ready
+  IfFileExists "$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe" 0 ensure_tap_after_install_system32
+  nsExec::ExecToLog '"$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "$PLUGINSDIR\ensure-wel-tap.ps1" -TapctlPath "$INSTDIR\resources\openvpn\bin\tapctl.exe"'
+  Pop $2
+  Goto ensure_tap_after_install_result
+ensure_tap_after_install_system32:
   nsExec::ExecToLog '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "$PLUGINSDIR\ensure-wel-tap.ps1" -TapctlPath "$INSTDIR\resources\openvpn\bin\tapctl.exe"'
   Pop $2
+ensure_tap_after_install_result:
   StrCmp $2 "0" tap_ready
   SetRebootFlag true
   StrCpy $6 "1"
