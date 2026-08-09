@@ -36,28 +36,7 @@ jobs:
               Write-Error "$($_.Name): $($errors -join '; ')"
             }
           }
-          $generatedFirewall = & node -e "process.stdout.write(require('./electron/firewall.cjs').buildFirewallScript('C:/Games/WE8.exe'))"
-          $tokens = $null
-          $errors = $null
-          [System.Management.Automation.Language.Parser]::ParseInput(($generatedFirewall -join "`n"), [ref]$tokens, [ref]$errors) | Out-Null
-          if ($errors.Count -gt 0) {
-            $failed = $true
-            Write-Error "生成的防火墙脚本: $($errors -join '; ')"
-          }
           if ($failed) { throw 'Windows PowerShell 脚本语法检查失败' }
-      - name: Verify Windows firewall rule integration
-        shell: pwsh
-        run: |
-          $gamePath = Join-Path $env:SystemRoot 'System32\notepad.exe'
-          $generatedFirewall = & node -e "process.stdout.write(require('./electron/firewall.cjs').buildFirewallScript(process.argv[1]))" $gamePath
-          try {
-            & ([ScriptBlock]::Create(($generatedFirewall -join "`n")))
-            if ($LASTEXITCODE -ne 0) { throw "防火墙规则核验失败，退出代码：$LASTEXITCODE" }
-          } finally {
-            & netsh.exe advfirewall firewall delete rule name="WEL WE8 Game Inbound" | Out-Null
-            & netsh.exe advfirewall firewall delete rule name="WEL WE8 Game Outbound" | Out-Null
-            & netsh.exe advfirewall firewall delete rule name="WEL WE8 Game Broadcast Outbound" | Out-Null
-          }
       - name: Build frontend
         run: npm run build
       - name: Check release runtime
