@@ -31,12 +31,12 @@ test('bundles the OpenVPN runtime and installs the Win7-compatible TAP helper', 
   assert.match(installer, /remove-wel-tap\.ps1/)
   assert.match(installer, /remove-wel-openvpn-msi\.ps1/)
   assert.match(installer, /hide-tap-windows\.ps1/)
+  assert.doesNotMatch(installer, /remove-wel-tap\.ps1" -TapctlPath "\$INSTDIR\\resources\\openvpn\\bin\\tapctl\.exe"/)
 })
 
 test('reuses one WEL adapter across upgrades and removes old WEL duplicates', () => {
   assert.doesNotMatch(ensureTap, /NetConnectionID -eq 'WEL TAP'/)
-  assert.match(ensureTap, /Remove-NumberedWelTapAdapters/)
-  assert.match(ensureTap, /WEL TAP|WEL Virtual LAN/)
+  assert.doesNotMatch(ensureTap, /Remove-NumberedWelTapAdapters/)
   assert.match(ensureTap, /Get-WmiObject -Class Win32_NetworkAdapter/)
   assert.doesNotMatch(ensureTap, /Get-NetAdapter/)
   assert.match(ensureTap, /if \(\$singleTapAdapter\.Count -eq 1\) {\s*exit 0\s*}/)

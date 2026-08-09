@@ -19,8 +19,8 @@ runtime_missing:
   Abort
 
 runtime_ready:
-  ; Clean old OpenVPN GUI entries and WEL-marked TAP installs before preparing
-  ; the single adapter used by this client.
+  ; Clean old OpenVPN GUI entries and legacy MSI leftovers, but keep any
+  ; existing TAP adapter so upgrades can reuse it directly.
   SetShellVarContext all
   IfFileExists "$APPDATA\WELPlatform\tap-msi-2.5.10.ready" 0 cleanup_previous_msi_done
   IfFileExists "$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe" 0 cleanup_previous_msi_system32
@@ -31,26 +31,10 @@ cleanup_previous_msi_system32:
   nsExec::ExecToLog '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "$PLUGINSDIR\remove-wel-openvpn-msi.ps1" -TapctlPath "$INSTDIR\resources\openvpn\bin\tapctl.exe"'
   Pop $4
 cleanup_previous_msi_result:
-  StrCmp $4 "0" cleanup_previous_msi_tap
+  StrCmp $4 "0" cleanup_previous_msi_done
   MessageBox MB_ICONSTOP|MB_OK "旧版 WEL TAP 组件清理失败（错误代码：$4）。请重启电脑后重新运行安装包。"
   Abort
-cleanup_previous_msi_tap:
-  IfFileExists "$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe" 0 cleanup_previous_msi_tap_system32
-  nsExec::ExecToLog '"$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "$PLUGINSDIR\remove-wel-tap.ps1" -TapctlPath "$INSTDIR\resources\openvpn\bin\tapctl.exe"'
-  Pop $5
-  Goto cleanup_previous_msi_done
-cleanup_previous_msi_tap_system32:
-  nsExec::ExecToLog '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "$PLUGINSDIR\remove-wel-tap.ps1" -TapctlPath "$INSTDIR\resources\openvpn\bin\tapctl.exe"'
-  Pop $5
 cleanup_previous_msi_done:
-  IfFileExists "$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe" 0 cleanup_wel_tap_system32
-  nsExec::ExecToLog '"$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "$PLUGINSDIR\remove-wel-tap.ps1" -TapctlPath "$INSTDIR\resources\openvpn\bin\tapctl.exe"'
-  Pop $5
-  Goto cleanup_wel_tap_done
-cleanup_wel_tap_system32:
-  nsExec::ExecToLog '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "$PLUGINSDIR\remove-wel-tap.ps1" -TapctlPath "$INSTDIR\resources\openvpn\bin\tapctl.exe"'
-  Pop $5
-cleanup_wel_tap_done:
   ; Clean startup entries left by older WEL releases that installed the full
   ; OpenVPN feature set. The current helper installs TAP-Windows only.
   nsExec::ExecToLog '"$SYSDIR\taskkill.exe" /F /IM openvpn-gui.exe'
