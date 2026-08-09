@@ -22,6 +22,7 @@ const TAP_STATE_PATH = path.join(APP_DATA_DIRECTORY, 'tap-adapter.json')
 const INSTALLER_TAP_STATE_PATH = path.join(process.env.PROGRAMDATA || 'C:\\ProgramData', 'WELPlatform', 'tap-create.txt')
 const MANAGEMENT_HOST = '127.0.0.1'
 const MANAGEMENT_STOP_TIMEOUT_MS = 3000
+const LIMITED_BROADCAST_ROUTE = '255.255.255.255'
 
 let connection = null
 
@@ -336,6 +337,36 @@ function removeFiles(files) {
   }
 }
 
+async function addLimitedBroadcastRoute(interfaceIndex) {
+  if (process.platform !== 'win32') return false
+  const index = Number(interfaceIndex)
+  if (!Number.isInteger(index) || index <= 0) return false
+  try {
+    await runPowerShell(`
+$route = '${LIMITED_BROADCAST_ROUTE}'
+$interfaceIndex = ${index}
+& "$env:SystemRoot\\System32\\route.exe" delete $route 2>$null | Out-Null
+& "$env:SystemRoot\\System32\\route.exe" add $route mask 255.255.255.255 0.0.0.0 IF $interfaceIndex metric 1 | Out-Null
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+`, 6000)
+    return true
+  } catch {
+    return false
+  }
+}
+
+async function removeLimitedBroadcastRoute() {
+  if (process.platform !== 'win32') return
+  try {
+    await runPowerShell(`
+& "$env:SystemRoot\\System32\\route.exe" delete ${LIMITED_BROADCAST_ROUTE} 2>$null | Out-Null
+exit 0
+`, 4000)
+  } catch {
+    // Route cleanup is best effort; Windows also drops the route on reboot.
+  }
+}
+
 function waitForProcessExit(process, timeoutMs) {
   if (process.exitCode !== null || process.killed) return Promise.resolve(true)
   return new Promise((resolve) => {
@@ -400,6 +431,7 @@ async function stopConnection() {
       try { current.process.kill() } catch {}
     }
   } finally {
+    await removeLimitedBroadcastRoute()
     removeFiles(current.temporaryFiles)
   }
 }
@@ -490,13 +522,17 @@ async function connectAttempt({ executable, host, port, roomID, username, token,
         initialized = true
         const network = await waitForVpnNetwork(subnetCidr, 8000)
         if (!network.connected) throw new Error(`OpenVPN 已连接，但未获取 ${subnetCidr} 的虚拟 IP`)
-        return inspectVpnNetwork(subnetCidr)
+        const inspected = await inspectVpnNetwork(subnetCidr)
+        await addLimitedBroadcastRoute(inspected.interfaceIndex)
+        return inspected
       }
       if (OPENVPN_PROGRESS.test(liveOutput) || OPENVPN_PROGRESS.test(fileOutput)) {
         const network = await waitForVpnNetwork(subnetCidr, 8000)
         if (network.connected) {
           initialized = true
-          return inspectVpnNetwork(subnetCidr)
+          const inspected = await inspectVpnNetwork(subnetCidr)
+          await addLimitedBroadcastRoute(inspected.interfaceIndex)
+          return inspected
         }
       }
       await wait(300)
@@ -550,6 +586,7 @@ module.exports = {
   OPENVPN_REMOTE_CERT_EKU,
   TAP_NAME,
   connect,
+  addLimitedBroadcastRoute,
   isWelTapAdapter,
   isRetryableConnectError,
   openVpnConfigPath,
@@ -561,4 +598,5 @@ module.exports = {
   selectWelTapAdapter,
   status,
   stopConnection,
+  removeLimitedBroadcastRoute,
 }

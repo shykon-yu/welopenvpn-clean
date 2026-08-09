@@ -27,6 +27,14 @@ test('configures the TAP address statically instead of using DHCP emulation', ()
   assert.doesNotMatch(client, /clearArpCache/)
 })
 
+test('pins limited broadcast traffic to the TAP interface after connect', () => {
+  const client = fs.readFileSync(path.join(__dirname, 'openvpn.cjs'), 'utf8')
+  assert.match(client, /LIMITED_BROADCAST_ROUTE = '255\.255\.255\.255'/)
+  assert.match(client, /route\.exe" add \$route mask 255\.255\.255\.255 0\.0\.0\.0 IF \$interfaceIndex metric 1/)
+  assert.match(client, /await addLimitedBroadcastRoute\(inspected\.interfaceIndex\)/)
+  assert.match(client, /await removeLimitedBroadcastRoute\(\)/)
+})
+
 test('keeps client and server cipher settings aligned', () => {
   const generator = fs.readFileSync(path.join(__dirname, '..', '..', 'deploy', 'openvpn', 'generate-room-configs.sh'), 'utf8')
   assert.match(generator, new RegExp(`data-ciphers ${OPENVPN_DATA_CIPHERS.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`))

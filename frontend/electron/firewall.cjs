@@ -2,6 +2,7 @@ const { runPowerShell } = require('./network.cjs')
 
 const TAP_UDP_IN_RULE = 'WEL TAP UDP Inbound'
 const TAP_UDP_OUT_RULE = 'WEL TAP UDP Outbound'
+const WE8_BROADCAST_OUT_RULE = 'WEL WE8 Broadcast Outbound'
 
 function normalizeGuid(value) {
   const match = String(value || '').match(/\{?([0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})\}?/i)
@@ -56,10 +57,43 @@ async function ensureTapUdpFirewall(adapterGuid) {
   return true
 }
 
+function buildWe8BroadcastFirewallScript(programPath) {
+  const normalizedPath = String(programPath || '').trim()
+  if (!normalizedPath) throw new Error('WE8 程序路径为空')
+
+  return `
+$ErrorActionPreference = 'Stop'
+$programPath = '${escapePowerShellSingleQuoted(normalizedPath)}'
+$policy = New-Object -ComObject HNetCfg.FwPolicy2
+try { $policy.Rules.Remove('${WE8_BROADCAST_OUT_RULE}') } catch {}
+
+$rule = New-Object -ComObject HNetCfg.FWRule
+$rule.Name = '${WE8_BROADCAST_OUT_RULE}'
+$rule.Description = 'Allow WE8 to send limited broadcast packets for host discovery.'
+$rule.ApplicationName = $programPath
+$rule.Protocol = 17
+$rule.Direction = 2
+$rule.Action = 1
+$rule.Enabled = $true
+$rule.Profiles = 2147483647
+$rule.RemoteAddresses = '255.255.255.255'
+$policy.Rules.Add($rule)
+`
+}
+
+async function ensureWe8BroadcastFirewall(programPath) {
+  if (process.platform !== 'win32') return false
+  await runPowerShell(buildWe8BroadcastFirewallScript(programPath), 12000)
+  return true
+}
+
 module.exports = {
   TAP_UDP_IN_RULE,
   TAP_UDP_OUT_RULE,
+  WE8_BROADCAST_OUT_RULE,
   buildTapUdpFirewallScript,
+  buildWe8BroadcastFirewallScript,
   ensureTapUdpFirewall,
+  ensureWe8BroadcastFirewall,
   normalizeGuid,
 }
