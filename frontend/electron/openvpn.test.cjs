@@ -17,9 +17,9 @@ test('sends explicit exit notify to shrink stale UDP sessions on reconnect', () 
   assert.match(client, /'explicit-exit-notify 1'/)
 })
 
-test('configures the TAP address statically instead of using DHCP emulation', () => {
+test('lets OpenVPN apply TAP addresses through DHCP emulation', () => {
   const client = fs.readFileSync(path.join(__dirname, 'openvpn.cjs'), 'utf8')
-  assert.match(client, /'ip-win32 netsh'/)
+  assert.match(client, /'ip-win32 dynamic'/)
   assert.match(client, /'dev-type tap'/)
   assert.doesNotMatch(client, /'dev tap'/)
   assert.doesNotMatch(client, /route-nopull/)
@@ -41,12 +41,15 @@ test('keeps client and server cipher settings aligned', () => {
   assert.match(generator, new RegExp(`cipher ${OPENVPN_FALLBACK_CIPHER}`))
   assert.match(generator, /setenv WEL_ROOM_ID \$\{room_id\}/)
   assert.match(generator, /setenv WEL_API_BASE_URL \$\{api_base\}/)
+  assert.match(generator, /client-connect \/etc\/welopenvpn\/auth\/sync-lease\.sh/)
+  assert.match(generator, /client-disconnect \/etc\/welopenvpn\/auth\/sync-lease\.sh/)
 })
 
-test('keeps the OpenVPN auth verifier aligned with the 10.222 room network', () => {
+test('verifies room leases without pinning backend-assigned VPN IPs', () => {
   const verifier = fs.readFileSync(path.join(__dirname, '..', '..', 'deploy', 'openvpn', 'auth', 'verify-lease.sh'), 'utf8')
   assert.match(verifier, /room_id.*\^\[1-6\]\$/)
-  assert.match(verifier, /\^10\\\.222\\\.\$\{room_id\}\\\./)
+  assert.doesNotMatch(verifier, /ifconfig-push/)
+  assert.doesNotMatch(verifier, /virtual_ip=.*lease\.virtual_ip/)
   assert.doesNotMatch(verifier, /\^10\\\.80\\\./)
 })
 

@@ -9,6 +9,9 @@ The WEL OpenVPN client logs into the existing platform API, enters a room, and
 uses its platform JWT as the OpenVPN password. `verify-lease.sh` calls the
 existing `GET /api/v1/me/room-session` endpoint and accepts the connection
 only when the JWT owns an unexpired lease for the OpenVPN instance's room.
+OpenVPN assigns the TAP address from the room `server-bridge` pool. After the
+address is assigned, `sync-lease.sh` posts the actual VPN IP back to the API
+using `OPENVPN_INTERNAL_SECRET`.
 
 This avoids a second user database and keeps the existing Laravel platform
 permissions, Go sessions, room capacity and heartbeat behavior unchanged.
@@ -16,12 +19,13 @@ permissions, Go sessions, room capacity and heartbeat behavior unchanged.
 ## Ubuntu setup
 
 1. Install `openvpn`, `curl` and `jq`.
-2. Copy this directory to `/etc/welopenvpn` and make `auth/verify-lease.sh`
-   and `generate-room-configs.sh` executable.
+2. Copy this directory to `/etc/welopenvpn` and make `auth/verify-lease.sh`,
+   `auth/sync-lease.sh` and `generate-room-configs.sh` executable.
 3. Put the OpenVPN CA certificate, server certificate and server private key
    in `/etc/welopenvpn/pki/` as `ca.crt`, `server.crt`, `server.key`.
 4. Copy `welopenvpn.env.example` to `/etc/welopenvpn/welopenvpn.env` and set
-   the platform API address.
+   the platform API address plus the same `OPENVPN_INTERNAL_SECRET` configured
+   on the Go API.
 5. Run `generate-room-configs.sh /etc/welopenvpn/rooms`.
 6. Install `systemd/welopenvpn@.service`, then enable instances `1` through
    `6`.

@@ -24,11 +24,6 @@ printf '%s' "$response" | jq -e \
   '.lease != null and .lease.room_id == $room_id and .lease.username == $username' \
   >/dev/null
 
-virtual_ip=$(printf '%s' "$response" | jq -r '.lease.virtual_ip // empty')
-[[ "$virtual_ip" =~ ^10\.222\.${room_id}\.[0-9]{1,3}$ ]] || exit 1
-
-ccd_dir="/run/welopenvpn/ccd/room-${room_id}"
-mkdir -p "$ccd_dir"
-tmp_file=$(mktemp "${ccd_dir}/.${username}.XXXXXX")
-printf 'ifconfig-push %s 255.255.255.0\n' "$virtual_ip" >"$tmp_file"
-mv "$tmp_file" "${ccd_dir}/${username}"
+# Older deployments wrote per-client CCD files to pin IPs from the backend.
+# Remove stale files so OpenVPN's server-bridge pool can assign the address.
+rm -f "/run/welopenvpn/ccd/room-${room_id}/${username}"

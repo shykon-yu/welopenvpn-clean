@@ -110,6 +110,11 @@ async function loadRoomMembers() {
   }
 }
 
+function updateActiveLeaseIP(actualIp?: string | null) {
+  if (!activeLease.value || !actualIp) return
+  activeLease.value = { ...activeLease.value, virtual_ip: actualIp }
+}
+
 async function checkSession() {
   if (!user.value || signingOut) return
   try {
@@ -253,6 +258,7 @@ async function joinRoom(room: Room) {
     activeLease.value = lease
     if (desktop()) {
       networkStatus.value = await connectDesktopVpn(lease)
+      updateActiveLeaseIP(networkStatus.value.actualIp)
     }
     startLeaseHeartbeat()
     startRoomMembersMonitor()
@@ -334,6 +340,8 @@ async function launchGame() {
       notice.value = '正在重新初始化虚拟网卡...'
       try { await desktop()!.disconnectVpn(lease.username) } catch { /* reconnecting refreshes any stale local VPN process */ }
       networkStatus.value = await connectDesktopVpn(lease)
+      updateActiveLeaseIP(networkStatus.value.actualIp)
+      await loadRoomMembers()
       firstLaunchReconnectPending.value = false
     }
     await desktop()!.launchGame(gamePath.value)

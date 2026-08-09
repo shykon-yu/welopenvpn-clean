@@ -4,7 +4,6 @@ set -euo pipefail
 output_dir=${1:-/etc/welopenvpn/rooms}
 api_base=${WEL_API_BASE_URL:-http://127.0.0.1:8082/api/v1}
 mkdir -p "$output_dir"
-mkdir -p /run/welopenvpn/ccd/room-{1,2,3,4,5,6}
 
 for room_id in 1 2 3 4 5 6; do
   subnet="10.222.${room_id}"
@@ -39,7 +38,8 @@ persist-key
 persist-tun
 script-security 3
 auth-user-pass-verify /etc/welopenvpn/auth/verify-lease.sh via-file
-client-config-dir /run/welopenvpn/ccd/room-${room_id}
+client-connect /etc/welopenvpn/auth/sync-lease.sh
+client-disconnect /etc/welopenvpn/auth/sync-lease.sh
 
 status /var/log/welopenvpn/room-${room_id}.status 30
 status-version 2
