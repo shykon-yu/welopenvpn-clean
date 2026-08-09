@@ -25,19 +25,6 @@ if ($singleTapAdapter.Count -eq 1) {
   exit 0
 }
 
-# Create one tap0901 adapter and keep the Windows-assigned connection name.
-& $TapctlPath create --hwid 'root\tap0901' | Out-Null
-$createExitCode = $LASTEXITCODE
-if ($createExitCode -eq 0) {
-  for ($attempt = 1; $attempt -le 20; $attempt++) {
-    $tapAdapters = @(Get-TapAdapters)
-    if ($tapAdapters.Count -eq 1) {
-      exit 0
-    }
-    Start-Sleep -Milliseconds 500
-  }
-}
-
-# Exit 3 tells the NSIS installer to install the official TAP-only MSI
-# features, then run this adapter preparation step again.
+# Exit 3 tells the NSIS installer to install the official TAP-only package and
+# then re-check the adapter list. WEL itself no longer creates extra adapters.
 exit 3

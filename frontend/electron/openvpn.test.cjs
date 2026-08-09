@@ -90,10 +90,10 @@ test('parses and reuses Windows-assigned WEL network connection names', () => {
 
 test('opens the remembered TAP adapter by GUID to avoid localized names', () => {
   const client = fs.readFileSync(path.join(__dirname, 'openvpn.cjs'), 'utf8')
-  assert.match(client, /runTapctl\(tapctl, \['create', '--hwid', 'root\\\\tap0901'\]/)
   assert.match(client, /`dev-node "\$\{tapNode\}"`/)
   assert.match(client, /tapNode: enabledAdapter\.guid/)
   assert.doesNotMatch(client, /tapNode: adapter\.name/)
+  assert.doesNotMatch(client, /runTapctl\(tapctl, \['create'/)
   assert.match(client, /ensureTapEnabled/)
   assert.match(client, /ensureTapUdpFirewall\(enabledAdapter\.guid\)/)
   assert.match(client, /Win32_NetworkAdapter/)

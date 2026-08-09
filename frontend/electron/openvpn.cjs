@@ -180,27 +180,16 @@ async function prepare() {
   const tapctl = locateTapctl()
   if (!tapctl) throw new Error('未检测到 WEL 虚拟网卡管理组件，请重新安装客户端')
 
-  let adapters = await listTapAdapters(tapctl)
+  const adapters = await listTapAdapters(tapctl)
   const rememberedGuid = readRememberedTapGuid()
-  let adapter = (rememberedGuid
+  const adapter = (rememberedGuid
     ? adapters.find(({ guid }) => guid.toLowerCase() === rememberedGuid)
     : null) || selectWelTapAdapter(adapters)
   if (adapter) {
     return { ...current, adapterReady: true, ...(await ensureTapReady(adapter)) }
   }
 
-  const createOutput = await runTapctl(tapctl, ['create', '--hwid', 'root\\tap0901'], 20000)
-  const createdGuid = parseTapGuid(createOutput)
-  for (let attempt = 0; attempt < 40; attempt += 1) {
-    adapters = await listTapAdapters(tapctl)
-    adapter = (createdGuid ? adapters.find(({ guid }) => guid.toLowerCase() === createdGuid) : null)
-      || selectWelTapAdapter(adapters)
-    if (adapter) {
-      return { ...current, adapterReady: true, ...(await ensureTapReady(adapter)) }
-    }
-    await wait(500)
-  }
-  throw new Error('WEL 虚拟网卡创建后未被 Windows 识别，请重启电脑后重试')
+  throw new Error('未找到 TAP 虚拟网卡，请重新运行完整安装包安装联机组件')
 }
 
 function safeFilePart(value) {
