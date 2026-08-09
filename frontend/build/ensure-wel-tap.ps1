@@ -20,8 +20,8 @@ function Get-TapAdapters {
 # Keep the Windows-assigned connection name such as Ethernet/Local Area
 # Connection. The client opens the adapter by GUID, so renaming is unnecessary.
 $tapAdapters = @(Get-TapAdapters)
-$singleTapAdapter = $tapAdapters | Select-Object -First 2
-if ($singleTapAdapter.Count -eq 1) {
+$existingTapAdapter = $tapAdapters | Select-Object -First 1
+if ($existingTapAdapter.Count -ge 1) {
   exit 0
 }
 
