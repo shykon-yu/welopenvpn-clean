@@ -3,6 +3,7 @@ const os = require('node:os')
 const path = require('node:path')
 const { spawn } = require('node:child_process')
 const { inspectVpnNetwork, runPowerShell, waitForVpnNetwork } = require('./network.cjs')
+const { ensureTapUdpFirewall } = require('./firewall.cjs')
 
 const DEFAULT_HOST = '8.133.189.9'
 const DEFAULT_PORT = 12001
@@ -98,6 +99,13 @@ function rememberTapAdapter(adapter) {
   }
 }
 
+async function ensureTapReady(adapter) {
+  const enabledAdapter = await ensureTapEnabled(adapter)
+  rememberTapAdapter(enabledAdapter)
+  try { await ensureTapUdpFirewall(enabledAdapter.guid) } catch {}
+  return { tapName: enabledAdapter.name, tapNode: enabledAdapter.guid, tapGuid: enabledAdapter.guid }
+}
+
 function selectWelTapAdapter(adapters) {
   const owned = adapters.filter(({ name }) => isWelTapAdapter(name))
   return owned.find(({ name }) => name.toLowerCase() === TAP_NAME.toLowerCase())
@@ -178,9 +186,7 @@ async function prepare() {
     ? adapters.find(({ guid }) => guid.toLowerCase() === rememberedGuid)
     : null) || selectWelTapAdapter(adapters)
   if (adapter) {
-    adapter = await ensureTapEnabled(adapter)
-    rememberTapAdapter(adapter)
-    return { ...current, adapterReady: true, tapName: adapter.name, tapNode: adapter.guid, tapGuid: adapter.guid }
+    return { ...current, adapterReady: true, ...(await ensureTapReady(adapter)) }
   }
 
   const createOutput = await runTapctl(tapctl, ['create', '--hwid', 'root\\tap0901'], 20000)
@@ -190,9 +196,7 @@ async function prepare() {
     adapter = (createdGuid ? adapters.find(({ guid }) => guid.toLowerCase() === createdGuid) : null)
       || selectWelTapAdapter(adapters)
     if (adapter) {
-      adapter = await ensureTapEnabled(adapter)
-      rememberTapAdapter(adapter)
-      return { ...current, adapterReady: true, tapName: adapter.name, tapNode: adapter.guid, tapGuid: adapter.guid }
+      return { ...current, adapterReady: true, ...(await ensureTapReady(adapter)) }
     }
     await wait(500)
   }
