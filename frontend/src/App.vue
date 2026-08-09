@@ -25,6 +25,7 @@ const notice = ref('')
 const desktopStatus = ref<DesktopStatus | null>(null)
 const pingResults = ref<Record<number, PingResult | undefined>>({})
 const selectedMemberId = ref<number | null>(null)
+const firstLaunchReconnectPending = ref(true)
 const form = ref({ username: '', password: '' })
 const GAME_PATH_KEY = 'we8.game-path'
 const LEGACY_GAME_PATH_KEY = 'pes8.game-path'
@@ -321,23 +322,27 @@ async function chooseGame() {
   }
 }
 
-async function inspectVpnBeforeLaunch(lease: Lease) {
-  const inspected: DesktopLeaseStatus | null = await desktop()!.inspectVpn({ username: lease.username, subnetCidr: lease.subnet_cidr })
-  if (!inspected.connected) throw new Error('尚未获取房间虚拟 IP，请退出房间后重新进入')
-  return inspected
-}
-
 async function launchGame() {
   errorMessage.value = ''
   if (!activeLease.value) { errorMessage.value = '请先进入一个房间并连接虚拟网络'; return }
   if (!gamePath.value.trim()) { errorMessage.value = '请先选择 WE8 游戏程序路径'; return }
   if (!desktop()) { notice.value = '浏览器预览不会启动本机程序，请在 Windows 客户端测试'; return }
+  const lease = activeLease.value
+  loading.value = true
   try {
-    const checkedStatus = await inspectVpnBeforeLaunch(activeLease.value)
-    if (!checkedStatus) return
-    networkStatus.value = checkedStatus
+    if (firstLaunchReconnectPending.value) {
+      notice.value = '正在重新初始化虚拟网卡...'
+      try { await desktop()!.disconnectVpn(lease.username) } catch { /* reconnecting refreshes any stale local VPN process */ }
+      networkStatus.value = await connectDesktopVpn(lease)
+      firstLaunchReconnectPending.value = false
+    }
     await desktop()!.launchGame(gamePath.value)
-  } catch (error) { errorMessage.value = messageOf(error) }
+    notice.value = '已启动 WE8'
+  } catch (error) {
+    errorMessage.value = messageOf(error)
+  } finally {
+    loading.value = false
+  }
 }
 async function pingMember(member: RoomMember) {
   if (!desktop()) return
