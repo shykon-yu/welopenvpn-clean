@@ -68,6 +68,32 @@ function parseTapctlList(output) {
     .filter(Boolean)
 }
 
+function decodeBase64Field(value) {
+  if (!value) return ''
+  try {
+    return Buffer.from(String(value), 'base64').toString('utf8')
+  } catch {
+    return ''
+  }
+}
+
+function parseWmiTapAdapters(output) {
+  return String(output || '')
+    .replace(/\r/g, '')
+    .split('\n')
+    .map((line) => {
+      const fields = line.trim().split('|')
+      if (fields.length < 3) return null
+      const guid = decodeBase64Field(fields[0]).trim()
+      const name = decodeBase64Field(fields[1]).trim() || decodeBase64Field(fields[2]).trim()
+      if (!guid) return null
+      const normalizedGuid = parseTapGuid(`{${guid.replace(/[{}]/g, '')}}`)
+      if (!normalizedGuid) return null
+      return { guid: normalizedGuid, name: name || TAP_NAME }
+    })
+    .filter(Boolean)
+}
+
 function isWelTapAdapter(name) {
   const normalized = String(name || '').trim()
   return WEL_TAP_NAME.test(normalized)
@@ -144,7 +170,38 @@ function runTapctl(executable, args, timeoutMs = 10000) {
 }
 
 async function listTapAdapters(tapctl) {
-  return parseTapctlList(await runTapctl(tapctl, ['list']))
+  try {
+    const adapters = parseTapctlList(await runTapctl(tapctl, ['list']))
+    if (adapters.length > 0) return adapters
+  } catch {
+    // Win7 can have a healthy TAP driver while tapctl cannot enumerate it.
+  }
+  return listTapAdaptersFromWmi()
+}
+
+async function listTapAdaptersFromWmi() {
+  const output = await runPowerShell(`
+function Encode-Value($value) {
+  if ($null -eq $value) { return '' }
+  [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes([string]$value))
+}
+
+Get-WmiObject -Class Win32_NetworkAdapter -ErrorAction SilentlyContinue |
+  Where-Object {
+    $_.GUID -and (
+      $_.ServiceName -eq 'tap0901' -or
+      $_.PNPDeviceID -match 'TAP0901'
+    )
+  } |
+  ForEach-Object {
+    [Console]::Out.WriteLine(
+      (Encode-Value $_.GUID) + '|' +
+      (Encode-Value $_.NetConnectionID) + '|' +
+      (Encode-Value $_.Name)
+    )
+  }
+`, 8000)
+  return parseWmiTapAdapters(output)
 }
 
 async function ensureTapEnabled(adapter) {
@@ -498,6 +555,7 @@ module.exports = {
   openVpnConfigPath,
   parseTapGuid,
   parseTapctlList,
+  parseWmiTapAdapters,
   prepare,
   readRecentLog,
   selectWelTapAdapter,

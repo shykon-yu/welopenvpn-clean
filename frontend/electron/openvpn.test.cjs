@@ -3,7 +3,7 @@ const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
 const os = require('node:os')
-const { CONNECT_MAX_ATTEMPTS, CONNECT_TIMEOUT_MS, OPENVPN_DATA_CIPHERS, OPENVPN_FALLBACK_CIPHER, OPENVPN_PROGRESS, OPENVPN_REMOTE_CERT_EKU, isWelTapAdapter, isRetryableConnectError, openVpnConfigPath, parseTapGuid, parseTapctlList, readRecentLog, selectWelTapAdapter } = require('./openvpn.cjs')
+const { CONNECT_MAX_ATTEMPTS, CONNECT_TIMEOUT_MS, OPENVPN_DATA_CIPHERS, OPENVPN_FALLBACK_CIPHER, OPENVPN_PROGRESS, OPENVPN_REMOTE_CERT_EKU, isWelTapAdapter, isRetryableConnectError, openVpnConfigPath, parseTapGuid, parseTapctlList, parseWmiTapAdapters, readRecentLog, selectWelTapAdapter } = require('./openvpn.cjs')
 
 test('uses OpenVPN-safe paths in generated config values', () => {
   assert.equal(
@@ -51,7 +51,7 @@ test('reads the latest openvpn log tail safely', () => {
 })
 
 test('detects OpenVPN network configuration progress before final ready line', () => {
-  assert.match('PUSH_REPLY,route-gateway 10.80.1.1,ifconfig 10.80.1.10 255.255.255.0', OPENVPN_PROGRESS)
+  assert.match('PUSH_REPLY,route-gateway 10.222.1.1,ifconfig 10.222.1.10 255.255.255.0', OPENVPN_PROGRESS)
   assert.match('tap-windows6 device [WEL TAP] opened', OPENVPN_PROGRESS)
   assert.doesNotMatch('UDPv4 link remote: [AF_INET]8.133.189.9:12001', OPENVPN_PROGRESS)
 })
@@ -88,6 +88,18 @@ test('parses and reuses Windows-assigned WEL network connection names', () => {
   assert.equal(parseTapGuid('Adapter {CCCCCCCC-CCCC-CCCC-CCCC-CCCCCCCCCCCC} created'), '{cccccccc-cccc-cccc-cccc-cccccccccccc}')
 })
 
+test('falls back to WMI TAP adapters when tapctl cannot list Win7 devices', () => {
+  const encode = (value) => Buffer.from(value, 'utf8').toString('base64')
+  const adapters = parseWmiTapAdapters([
+    `${encode('{11111111-2222-3333-4444-555555555555}')}|${encode('本地连接')}|${encode('TAP-Windows Adapter V9')}`,
+    `${encode('AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE')}||${encode('TAP-Windows Adapter V9')}`,
+  ].join('\r\n'))
+  assert.deepEqual(adapters, [
+    { guid: '{11111111-2222-3333-4444-555555555555}', name: '本地连接' },
+    { guid: '{aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee}', name: 'TAP-Windows Adapter V9' },
+  ])
+})
+
 test('opens the remembered TAP adapter by GUID to avoid localized names', () => {
   const client = fs.readFileSync(path.join(__dirname, 'openvpn.cjs'), 'utf8')
   assert.match(client, /`dev-node "\$\{tapNode\}"`/)
@@ -102,6 +114,8 @@ test('opens the remembered TAP adapter by GUID to avoid localized names', () => 
   assert.match(client, /tapGuid: enabledAdapter\.guid/)
   assert.match(client, /readRememberedTapGuid\(\)/)
   assert.match(client, /INSTALLER_TAP_STATE_PATH/)
+  assert.match(client, /listTapAdaptersFromWmi/)
+  assert.match(client, /ServiceName -eq 'tap0901'/)
   assert.match(client, /stopStaleWelOpenVpnProcesses/)
   assert.match(client, /await wait\(500\)/)
   assert.doesNotMatch(client, /Set-ItemProperty -LiteralPath \$connectionKey -Name 'Name'/)

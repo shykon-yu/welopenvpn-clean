@@ -3,26 +3,26 @@ const assert = require('node:assert/strict')
 const { analyzeNetwork, findNetstatLines, findRoomAddress, isIPv4InCIDR, parseAdapterOutput, parseTasklistPids } = require('./network.cjs')
 
 test('matches only addresses in the room subnet', () => {
-  assert.equal(isIPv4InCIDR('10.80.3.10', '10.80.3.0/24'), true)
-  assert.equal(isIPv4InCIDR('10.80.4.10', '10.80.3.0/24'), false)
-  assert.equal(isIPv4InCIDR('invalid', '10.80.3.0/24'), false)
+  assert.equal(isIPv4InCIDR('10.222.3.10', '10.222.3.0/24'), true)
+  assert.equal(isIPv4InCIDR('10.222.4.10', '10.222.3.0/24'), false)
+  assert.equal(isIPv4InCIDR('invalid', '10.222.3.0/24'), false)
 })
 
 test('finds the real room address from operating system interfaces', () => {
-  const result = findRoomAddress('10.80.3.0/24', {
+  const result = findRoomAddress('10.222.3.0/24', {
     Ethernet: [{ family: 'IPv4', address: '192.168.1.20', internal: false }],
-    VPN: [{ family: 'IPv4', address: '10.80.3.11', internal: false }],
+    VPN: [{ family: 'IPv4', address: '10.222.3.11', internal: false }],
   })
-  assert.deepEqual(result, { name: 'VPN', address: '10.80.3.11' })
+  assert.deepEqual(result, { name: 'VPN', address: '10.222.3.11' })
 })
 
 test('returns only the active room adapter details', () => {
-  const status = analyzeNetwork('10.80.3.0/24', { name: 'VPN', address: '10.80.3.11' }, [
+  const status = analyzeNetwork('10.222.3.0/24', { name: 'VPN', address: '10.222.3.11' }, [
     {
       description: 'WEL TAP', ipEnabled: true,
       interfaceIndex: 18, interfaceMetric: 25,
-      ipAddresses: ['10.80.3.11'], subnets: ['255.255.255.0'],
-      defaultGateways: ['10.80.3.1'], dnsServers: ['10.80.3.1'],
+      ipAddresses: ['10.222.3.11'], subnets: ['255.255.255.0'],
+      defaultGateways: ['10.222.3.1'], dnsServers: ['10.222.3.1'],
     },
     {
       description: 'TAP-Windows Adapter V9', ipEnabled: true,
@@ -39,7 +39,7 @@ test('returns only the active room adapter details', () => {
   ])
 
   assert.equal(status.connected, true)
-  assert.equal(status.actualIp, '10.80.3.11')
+  assert.equal(status.actualIp, '10.222.3.11')
   assert.equal(status.interfaceIndex, 18)
   assert.equal(status.adapterName, 'VPN')
   assert.equal(status.adapterDescription, 'WEL TAP')
@@ -48,7 +48,7 @@ test('returns only the active room adapter details', () => {
 
 test('parses base64 encoded PowerShell adapter fields', () => {
   const encode = (value) => Buffer.from(value, 'utf8').toString('base64')
-  const output = `${encode('WEL TAP')}|True|18|25|${encode('10.80.1.10')}|${encode('255.255.255.0')}|||${encode('00:FF:12:34:56:78')}\n`
+  const output = `${encode('WEL TAP')}|True|18|25|${encode('10.222.1.10')}|${encode('255.255.255.0')}|||${encode('00:FF:12:34:56:78')}\n`
   const adapters = parseAdapterOutput(output)
   assert.equal(adapters.length, 1)
   assert.equal(adapters[0].description, 'WEL TAP')
@@ -72,7 +72,7 @@ test('parses WE8 tasklist rows and matches netstat endpoints by PID', () => {
   const endpoints = findNetstatLines([
     '  UDP    0.0.0.0:5739           *:*                                    3108',
     '  UDP    0.0.0.0:49288          *:*                                    10908',
-    '  TCP    10.80.1.13:2300        10.80.1.14:49820       ESTABLISHED     5520',
+    '  TCP    10.222.1.13:2300        10.222.1.14:49820       ESTABLISHED     5520',
   ].join('\r\n'), processes)
   assert.equal(endpoints.length, 2)
   assert.match(endpoints[0], /5739/)
