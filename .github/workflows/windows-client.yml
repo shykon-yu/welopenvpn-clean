@@ -1,0 +1,90 @@
+name: Build WEL Windows Client
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-2022
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 18
+      - name: Install dependencies
+        run: npm install --legacy-peer-deps --ignore-scripts
+      - name: Test Electron helpers
+        run: npm run test:electron
+      - name: Check Windows PowerShell scripts
+        shell: pwsh
+        run: |
+          $failed = $false
+          Get-ChildItem build -Filter '*.ps1' | ForEach-Object {
+            $tokens = $null
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile($_.FullName, [ref]$tokens, [ref]$errors) | Out-Null
+            if ($errors.Count -gt 0) {
+              $failed = $true
+              Write-Error "$($_.Name): $($errors -join '; ')"
+            }
+          }
+          $generatedFirewall = & node -e "process.stdout.write(require('./electron/firewall.cjs').buildFirewallScript('C:/Games/WE8.exe'))"
+          $tokens = $null
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseInput(($generatedFirewall -join "`n"), [ref]$tokens, [ref]$errors) | Out-Null
+          if ($errors.Count -gt 0) {
+            $failed = $true
+            Write-Error "生成的防火墙脚本: $($errors -join '; ')"
+          }
+          if ($failed) { throw 'Windows PowerShell 脚本语法检查失败' }
+      - name: Verify Windows firewall rule integration
+        shell: pwsh
+        run: |
+          $gamePath = Join-Path $env:SystemRoot 'System32\notepad.exe'
+          $generatedFirewall = & node -e "process.stdout.write(require('./electron/firewall.cjs').buildFirewallScript(process.argv[1]))" $gamePath
+          try {
+            & ([ScriptBlock]::Create(($generatedFirewall -join "`n")))
+            if ($LASTEXITCODE -ne 0) { throw "防火墙规则核验失败，退出代码：$LASTEXITCODE" }
+          } finally {
+            & netsh.exe advfirewall firewall delete rule name="WEL WE8 Game Inbound" | Out-Null
+            & netsh.exe advfirewall firewall delete rule name="WEL WE8 Game Outbound" | Out-Null
+            & netsh.exe advfirewall firewall delete rule name="WEL WE8 Game Broadcast Outbound" | Out-Null
+          }
+      - name: Build frontend
+        run: npm run build
+      - name: Check release runtime
+        shell: pwsh
+        run: |
+          $required = @(
+            'resources/openvpn/bin/openvpn.exe',
+            'resources/openvpn/bin/libcrypto-1_1-x64.dll',
+            'resources/openvpn/bin/libssl-1_1-x64.dll',
+            'resources/openvpn/bin/libpkcs11-helper-1.dll',
+            'resources/openvpn/bin/vcruntime140.dll',
+            'resources/openvpn/bin/tapctl.exe',
+            'resources/openvpn/ca.crt',
+            'build/OpenVPN-2.5.10-I601-amd64.msi'
+          )
+          $missing = @($required | Where-Object { -not (Test-Path $_) })
+          if ($missing.Count -gt 0) {
+            throw "缺少安装包运行时文件，无法生成 Windows 安装包: $($missing -join ', ')"
+          }
+      - name: Build NSIS installer
+        run: npx electron-builder --win nsis
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: wel-windows-win7-nsis
+          path: frontend/release/WEL职业联盟对战平台-*-安装包.exe
+          if-no-files-found: error
+          retention-days: 14

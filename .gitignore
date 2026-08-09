@@ -1,0 +1,7 @@
+.DS_Store
+frontend/node_modules/
+frontend/package-lock.json
+frontend/dist/
+frontend/release/
+frontend/resources/openvpn/driver/
+*.log
