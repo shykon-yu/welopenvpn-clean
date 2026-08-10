@@ -43,12 +43,10 @@ test('builds n2n edge arguments from backend-assigned room leases', () => {
     tapName: '以太网 2',
   }), [
     '-d', '以太网 2',
-    '-f',
     '-E',
     '-c', 'wel-10.222.1.0-24',
     '-l', 'game.example.test:22222',
-    '-a', '10.222.1.10',
-    '-s', '255.255.255.0',
+    '-a', '10.222.1.10/24',
     '-m', '02:57:0A:DE:01:0A',
     '-t', '5645',
     '-x', '1',
@@ -67,7 +65,7 @@ test('does not generate OpenVPN client configuration while connecting', () => {
   assert.match(client, /path\.join\(resources, 'n2n', 'edge\.exe'\)/)
   assert.match(client, /tap-windows-9\.21\.2\.exe/)
   assert.match(client, /installBundledTapDriver/)
-  assert.match(client, /'-a', virtualIP/)
+  assert.match(client, /'-a', `\$\{virtualIP\}\/\$\{prefixFromCidr\(subnetCidr\)\}`/)
   assert.match(client, /'-d', tapName/)
   assert.match(client, /stopStaleWelN2nProcesses/)
   assert.doesNotMatch(client, /'ip-win32 dynamic'/)

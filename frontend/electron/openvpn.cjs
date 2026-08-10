@@ -318,6 +318,12 @@ function subnetMaskFromCidr(cidr) {
   return [24, 16, 8, 0].map((shift) => (mask >>> shift) & 255).join('.')
 }
 
+function prefixFromCidr(cidr) {
+  const prefix = Number(String(cidr || '').split('/')[1])
+  if (!Number.isInteger(prefix) || prefix < 0 || prefix > 32) return 24
+  return prefix
+}
+
 function macFromVirtualIP(virtualIP) {
   const octets = String(virtualIP || '').split('.').map(Number)
   if (octets.length !== 4 || octets.some((value) => !Number.isInteger(value) || value < 0 || value > 255)) {
@@ -436,12 +442,10 @@ function n2nCommunity(roomID, community) {
 function buildEdgeArgs({ host, port, roomID, username, subnetCidr, virtualIP, community, transportKey, tapName }) {
   if (!virtualIP) throw new Error('n2n 房间虚拟 IP 未分配，请重新进入房间')
   const args = [
-    '-f',
     '-E',
     '-c', n2nCommunity(roomID, community),
     '-l', `${host}:${port}`,
-    '-a', virtualIP,
-    '-s', subnetMaskFromCidr(subnetCidr),
+    '-a', `${virtualIP}/${prefixFromCidr(subnetCidr)}`,
     '-m', macFromVirtualIP(virtualIP),
     '-t', '5645',
     '-x', '1',
