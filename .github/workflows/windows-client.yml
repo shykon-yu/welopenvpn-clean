@@ -18,28 +18,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Extract bundled official n2n source archive
-        shell: pwsh
+        shell: bash
         working-directory: ${{ github.workspace }}
         run: |
-          $ErrorActionPreference = 'Stop'
-          $archiveName = "n2n-$($env:N2N_VERSION).zip"
-          $buildRoot = Join-Path $env:GITHUB_WORKSPACE '.n2n-build'
-          $archivePath = Join-Path $env:GITHUB_WORKSPACE "third_party/n2n/$archiveName"
-          Write-Host "Workspace: $env:GITHUB_WORKSPACE"
-          Write-Host "Archive: $archivePath"
-          if (-not (Test-Path $archivePath)) {
-            throw "缺少内置 n2n 源码包：$archivePath"
-          }
-          Remove-Item $buildRoot -Recurse -Force -ErrorAction SilentlyContinue
-          New-Item -ItemType Directory -Path $buildRoot -Force | Out-Null
-          Expand-Archive -LiteralPath $archivePath -DestinationPath $buildRoot -Force
-          $sourceDirectory = Get-ChildItem $buildRoot -Directory |
-            Where-Object { $_.Name -like 'n2n-*' -and $_.Name -ne 'source' } |
-            Select-Object -First 1
-          if ($null -eq $sourceDirectory) {
-            throw '未找到解压后的 n2n 源码目录'
-          }
-          Rename-Item -Path $sourceDirectory.FullName -NewName 'source'
+          set -euo pipefail
+          archive_path="third_party/n2n/n2n-${N2N_VERSION}.zip"
+          echo "workspace: $(pwd)"
+          echo "archive: ${archive_path}"
+          test -f "${archive_path}"
+          rm -rf .n2n-build
+          mkdir -p .n2n-build
+          unzip -q "${archive_path}" -d .n2n-build
+          mv ".n2n-build/n2n-${N2N_VERSION}" .n2n-build/source
+          test -d .n2n-build/source
       - name: Install MSYS2 build toolchain
         uses: msys2/setup-msys2@v2
         with:
