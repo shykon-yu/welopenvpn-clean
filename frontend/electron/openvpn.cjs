@@ -18,6 +18,7 @@ const TAP_STATE_PATH = path.join(APP_DATA_DIRECTORY, 'tap-adapter.json')
 const INSTALLER_TAP_STATE_PATH = path.join(process.env.PROGRAMDATA || 'C:\\ProgramData', 'WELPlatform', 'tap-create.txt')
 const STOP_TIMEOUT_MS = 3000
 const NETWORK_ADAPTER_CLASS_KEY = 'HKLM\\SYSTEM\\CurrentControlSet\\Control\\Class\\{4D36E972-E325-11CE-BFC1-08002BE10318}'
+const NETWORK_CONNECTIONS_KEY = 'HKLM\\SYSTEM\\CurrentControlSet\\Control\\Network\\{4D36E972-E325-11CE-BFC1-08002BE10318}'
 
 let connection = null
 let preparedTap = null
@@ -106,7 +107,32 @@ function parseWmiTapAdapters(output) {
     .filter(Boolean)
 }
 
-function parseRegistryTapAdapters(output) {
+function parseRegistryConnectionNames(output) {
+  const sections = []
+  let current = null
+  for (const line of String(output || '').replace(/\r/g, '').split('\n')) {
+    const trimmed = line.trim()
+    if (/^HKEY_/i.test(trimmed)) {
+      if (current) sections.push(current)
+      current = { key: trimmed, values: {} }
+      continue
+    }
+    if (!current) continue
+    const value = line.match(/^\s+([^\s]+)\s+REG_[A-Z0-9_]+\s+(.*)$/i)
+    if (value) current.values[value[1].toLowerCase()] = value[2].trim()
+  }
+  if (current) sections.push(current)
+
+  const connections = new Map()
+  for (const { key, values } of sections) {
+    const match = key.match(/\\\{([0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})\}\\connection$/i)
+    const name = values.name?.replace(/^['"]|['"]$/g, '').trim()
+    if (match && name) connections.set(match[1].toLowerCase(), name)
+  }
+  return connections
+}
+
+function parseRegistryTapAdapters(output, connectionNames = null) {
   const sections = []
   let current = null
   for (const line of String(output || '').replace(/\r/g, '').split('\n')) {
@@ -128,8 +154,9 @@ function parseRegistryTapAdapters(output) {
     const isTap = /(?:^|\\)tap0?(?:801|901)$/i.test(component)
       || /TAP-Windows Adapter|OpenVPN TAP-Windows|WEL TAP/i.test(description)
     const guid = extractTapGuid(values.netcfginstanceid)
-    if (!isTap || !guid) return null
-    return { guid, name: description || TAP_NAME }
+    const connectionName = guid ? connectionNames?.get(guid.slice(1, -1).toLowerCase()) : null
+    if (!isTap || !guid || (connectionNames && !connectionName)) return null
+    return { guid, name: connectionName || description || TAP_NAME }
   }).filter(Boolean)
 }
 
@@ -210,8 +237,7 @@ async function listTapAdapters(tapctl) {
     // Win7 can have a healthy TAP driver while tapctl cannot enumerate it.
   }
   try {
-    const adapters = await listTapAdaptersFromRegistry()
-    if (adapters.length > 0) return adapters
+    return await listTapAdaptersFromRegistry()
   } catch {
     // Restricted Windows policies can deny access to the adapter class key.
   }
@@ -225,8 +251,11 @@ async function listTapAdapters(tapctl) {
 }
 
 async function listTapAdaptersFromRegistry() {
-  const output = await runProcess('reg.exe', ['query', NETWORK_ADAPTER_CLASS_KEY, '/s'], 10000)
-  return parseRegistryTapAdapters(output)
+  const [classOutput, connectionOutput] = await Promise.all([
+    runProcess('reg.exe', ['query', NETWORK_ADAPTER_CLASS_KEY, '/s'], 10000),
+    runProcess('reg.exe', ['query', NETWORK_CONNECTIONS_KEY, '/s'], 10000),
+  ])
+  return parseRegistryTapAdapters(classOutput, parseRegistryConnectionNames(connectionOutput))
 }
 
 async function listTapAdaptersFromWmi() {
@@ -305,7 +334,12 @@ async function prepare() {
 
   await installBundledTapDriver(installer)
   adapters = await waitForTapAdapter(tapctl)
-  const installedAdapter = selectWelTapAdapter(adapters)
+  let installedAdapter = selectWelTapAdapter(adapters)
+  if (!installedAdapter) {
+    await runTapctl(tapctl, ['create', '--hwid', 'tap0901'])
+    adapters = await waitForTapAdapter(tapctl)
+    installedAdapter = selectWelTapAdapter(adapters)
+  }
   if (!installedAdapter) throw new Error('TAP 虚拟网卡驱动安装后仍未检测到网卡，请重启 Windows 后重试')
   return { ...current, adapterReady: true, ...(await ensureTapReady(installedAdapter)) }
 }
@@ -615,6 +649,7 @@ module.exports = {
   transportConfigPath,
   parseTapGuid,
   parseTapctlList,
+  parseRegistryConnectionNames,
   parseRegistryTapAdapters,
   parseWmiTapAdapters,
   prepare,

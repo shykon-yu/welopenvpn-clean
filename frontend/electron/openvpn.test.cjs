@@ -15,6 +15,7 @@ const {
   n2nExitReason,
   parseTapGuid,
   parseTapctlList,
+  parseRegistryConnectionNames,
   parseRegistryTapAdapters,
   parseWmiTapAdapters,
   readRecentLog,
@@ -150,6 +151,10 @@ test('falls back to WMI TAP adapters when tapctl cannot list Win7 devices', () =
 })
 
 test('detects installed TAP adapters from the Windows network class registry', () => {
+  const connectionNames = parseRegistryConnectionNames([
+    'HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Control\\Network\\{4D36E972-E325-11CE-BFC1-08002BE10318}\\{ABCDEF12-3456-7890-ABCD-EF1234567890}\\Connection',
+    '    Name    REG_SZ    以太网 2',
+  ].join('\r\n'))
   const adapters = parseRegistryTapAdapters([
     'HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Control\\Class\\{4D36E972-E325-11CE-BFC1-08002BE10318}\\0001',
     '    ComponentId    REG_SZ    tap0901',
@@ -160,10 +165,20 @@ test('detects installed TAP adapters from the Windows network class registry', (
     '    ComponentId    REG_SZ    pci\\ven_8086',
     '    DriverDesc    REG_SZ    Intel Ethernet Adapter',
     '    NetCfgInstanceId    REG_SZ    {BBBBBBBB-BBBB-BBBB-BBBB-BBBBBBBBBBBB}',
-  ].join('\r\n'))
+  ].join('\r\n'), connectionNames)
   assert.deepEqual(adapters, [
-    { guid: '{ABCDEF12-3456-7890-ABCD-EF1234567890}', name: 'TAP-Windows Adapter V9' },
+    { guid: '{ABCDEF12-3456-7890-ABCD-EF1234567890}', name: '以太网 2' },
   ])
+})
+
+test('ignores a TAP class record without a live Windows network connection', () => {
+  const adapters = parseRegistryTapAdapters([
+    'HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Control\\Class\\{4D36E972-E325-11CE-BFC1-08002BE10318}\\0001',
+    '    ComponentId    REG_SZ    tap0901',
+    '    DriverDesc    REG_SZ    TAP-Windows Adapter V9',
+    '    NetCfgInstanceId    REG_SZ    {ABCDEF12-3456-7890-ABCD-EF1234567890}',
+  ].join('\r\n'), new Map())
+  assert.deepEqual(adapters, [])
 })
 
 test('preserves the Windows TAP GUID casing passed to n2n', () => {
@@ -186,7 +201,8 @@ test('opens the remembered TAP adapter without creating or deleting adapters', (
   const client = fs.readFileSync(path.join(__dirname, 'openvpn.cjs'), 'utf8')
   assert.match(client, /tapName: enabledAdapter\.name/)
   assert.match(client, /tapNode: enabledAdapter\.guid/)
-  assert.doesNotMatch(client, /runTapctl\(tapctl, \['create'/)
+  assert.match(client, /runTapctl\(tapctl, \['create', '--hwid', 'tap0901'\]\)/)
+  assert.match(client, /if \(!installedAdapter\) \{\s*await runTapctl\(tapctl, \['create', '--hwid', 'tap0901'\]\)/)
   assert.doesNotMatch(client, /runTapctl\(tapctl, \['delete'/)
   assert.match(client, /ensureTapEnabled/)
   assert.match(client, /Win32_NetworkAdapter/)
@@ -196,6 +212,8 @@ test('opens the remembered TAP adapter without creating or deleting adapters', (
   assert.match(client, /INSTALLER_TAP_STATE_PATH/)
   assert.match(client, /listTapAdaptersFromWmi/)
   assert.match(client, /listTapAdaptersFromRegistry/)
+  assert.match(client, /NETWORK_CONNECTIONS_KEY/)
+  assert.match(client, /parseRegistryConnectionNames/)
   assert.match(client, /ServiceName -match '[^']*tap0\?\(801\|901\)/)
   assert.match(client, /Name -match '[^']*TAP-Windows Adapter/)
   assert.match(client, /await prepare\(\)/)
@@ -207,6 +225,7 @@ test('green editions install TAP only when no enumerated TAP adapter exists', ()
   assert.match(client, /if \(adapter\) \{\s*return \{ \.\.\.current, adapterReady: true/)
   assert.match(client, /const installer = locateTapInstaller\(\)/)
   assert.match(client, /await installBundledTapDriver\(installer\)/)
+  assert.match(client, /await installBundledTapDriver\(installer\)\s*adapters = await waitForTapAdapter\(tapctl\)\s*let installedAdapter = selectWelTapAdapter\(adapters\)\s*if \(!installedAdapter\)/)
   assert.match(client, /find\(\(\{ guid \}\) => Boolean\(parseTapGuid\(guid\)\)\)/)
   assert.doesNotMatch(client, /const owned = adapters\.filter\(\(\{ name \}\)/)
   assert.doesNotMatch(client, /runTapctl\(tapctl, \['delete'/)
