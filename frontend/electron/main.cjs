@@ -121,7 +121,14 @@ function pingHost(host) {
 }
 
 ipcMain.handle('openvpn-status', () => openvpn.status())
-ipcMain.handle('prepare-openvpn', () => openvpn.prepare())
+ipcMain.handle('prepare-openvpn', async () => {
+  try {
+    return await openvpn.prepare()
+  } catch (error) {
+    writeLog('准备联机组件失败', error)
+    throw error
+  }
+})
 ipcMain.handle('connect-openvpn', async (_event, credentials) => openvpn.connect(credentials))
 ipcMain.handle('disconnect-openvpn', () => openvpn.stopConnection())
 ipcMain.handle('inspect-openvpn', (_event, { subnetCidr }) => inspectVpnNetwork(subnetCidr))

@@ -2,7 +2,7 @@ const fs = require('node:fs')
 const os = require('node:os')
 const path = require('node:path')
 const { spawn } = require('node:child_process')
-const { inspectVpnNetwork, runPowerShell, waitForVpnNetwork } = require('./network.cjs')
+const { inspectVpnNetwork, runPowerShell, runProcess, waitForVpnNetwork } = require('./network.cjs')
 const { ensureEdgeFirewall } = require('./firewall.cjs')
 
 const DEFAULT_HOST = '8.133.189.9'
@@ -17,6 +17,7 @@ const LOG_DIRECTORY = path.join(APP_DATA_DIRECTORY, 'logs')
 const TAP_STATE_PATH = path.join(APP_DATA_DIRECTORY, 'tap-adapter.json')
 const INSTALLER_TAP_STATE_PATH = path.join(process.env.PROGRAMDATA || 'C:\\ProgramData', 'WELPlatform', 'tap-create.txt')
 const STOP_TIMEOUT_MS = 3000
+const NETWORK_ADAPTER_CLASS_KEY = 'HKLM\\SYSTEM\\CurrentControlSet\\Control\\Class\\{4D36E972-E325-11CE-BFC1-08002BE10318}'
 
 let connection = null
 let preparedTap = null
@@ -105,6 +106,33 @@ function parseWmiTapAdapters(output) {
     .filter(Boolean)
 }
 
+function parseRegistryTapAdapters(output) {
+  const sections = []
+  let current = null
+  for (const line of String(output || '').replace(/\r/g, '').split('\n')) {
+    const trimmed = line.trim()
+    if (/^HKEY_/i.test(trimmed)) {
+      if (current) sections.push(current)
+      current = { key: trimmed, values: {} }
+      continue
+    }
+    if (!current) continue
+    const value = line.match(/^\s+([^\s]+)\s+REG_[A-Z0-9_]+\s+(.*)$/i)
+    if (value) current.values[value[1].toLowerCase()] = value[2].trim()
+  }
+  if (current) sections.push(current)
+
+  return sections.map(({ values }) => {
+    const component = values.componentid || values.service || ''
+    const description = values.driverdesc || ''
+    const isTap = /(?:^|\\)tap0?(?:801|901)$/i.test(component)
+      || /TAP-Windows Adapter|OpenVPN TAP-Windows|WEL TAP/i.test(description)
+    const guid = extractTapGuid(values.netcfginstanceid)
+    if (!isTap || !guid) return null
+    return { guid, name: description || TAP_NAME }
+  }).filter(Boolean)
+}
+
 function isWelTapAdapter(name) {
   const normalized = String(name || '').trim()
   return WEL_TAP_NAME.test(normalized)
@@ -181,7 +209,24 @@ async function listTapAdapters(tapctl) {
   } catch {
     // Win7 can have a healthy TAP driver while tapctl cannot enumerate it.
   }
-  return listTapAdaptersFromWmi()
+  try {
+    const adapters = await listTapAdaptersFromRegistry()
+    if (adapters.length > 0) return adapters
+  } catch {
+    // Restricted Windows policies can deny access to the adapter class key.
+  }
+  try {
+    return await listTapAdaptersFromWmi()
+  } catch {
+    // Detection failure must not prevent a green edition from running its
+    // bundled TAP installer on a machine that has no adapter yet.
+    return []
+  }
+}
+
+async function listTapAdaptersFromRegistry() {
+  const output = await runProcess('reg.exe', ['query', NETWORK_ADAPTER_CLASS_KEY, '/s'], 10000)
+  return parseRegistryTapAdapters(output)
 }
 
 async function listTapAdaptersFromWmi() {
@@ -563,6 +608,7 @@ module.exports = {
   transportConfigPath,
   parseTapGuid,
   parseTapctlList,
+  parseRegistryTapAdapters,
   parseWmiTapAdapters,
   prepare,
   readRecentLog,

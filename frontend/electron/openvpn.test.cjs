@@ -14,6 +14,7 @@ const {
   n2nCommunity,
   parseTapGuid,
   parseTapctlList,
+  parseRegistryTapAdapters,
   parseWmiTapAdapters,
   readRecentLog,
   selectWelTapAdapter,
@@ -140,6 +141,23 @@ test('falls back to WMI TAP adapters when tapctl cannot list Win7 devices', () =
   ])
 })
 
+test('detects installed TAP adapters from the Windows network class registry', () => {
+  const adapters = parseRegistryTapAdapters([
+    'HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Control\\Class\\{4D36E972-E325-11CE-BFC1-08002BE10318}\\0001',
+    '    ComponentId    REG_SZ    tap0901',
+    '    DriverDesc    REG_SZ    TAP-Windows Adapter V9',
+    '    NetCfgInstanceId    REG_SZ    {ABCDEF12-3456-7890-ABCD-EF1234567890}',
+    '',
+    'HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Control\\Class\\{4D36E972-E325-11CE-BFC1-08002BE10318}\\0002',
+    '    ComponentId    REG_SZ    pci\\ven_8086',
+    '    DriverDesc    REG_SZ    Intel Ethernet Adapter',
+    '    NetCfgInstanceId    REG_SZ    {BBBBBBBB-BBBB-BBBB-BBBB-BBBBBBBBBBBB}',
+  ].join('\r\n'))
+  assert.deepEqual(adapters, [
+    { guid: '{ABCDEF12-3456-7890-ABCD-EF1234567890}', name: 'TAP-Windows Adapter V9' },
+  ])
+})
+
 test('preserves the Windows TAP GUID casing passed to n2n', () => {
   const guid = '{ABCDEF12-3456-7890-ABCD-EF1234567890}'
   const adapter = selectWelTapAdapter(parseTapctlList(`${guid} Ethernet 7`))
@@ -169,6 +187,7 @@ test('opens the remembered TAP adapter without creating or deleting adapters', (
   assert.match(client, /readRememberedTapGuid\(\)/)
   assert.match(client, /INSTALLER_TAP_STATE_PATH/)
   assert.match(client, /listTapAdaptersFromWmi/)
+  assert.match(client, /listTapAdaptersFromRegistry/)
   assert.match(client, /ServiceName -match '[^']*tap0\?\(801\|901\)/)
   assert.match(client, /Name -match '[^']*TAP-Windows Adapter/)
   assert.match(client, /await prepare\(\)/)

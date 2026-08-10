@@ -67,6 +67,13 @@ function parseAdapterOutput(output) {
   }).filter(Boolean)
 }
 
+function formatProcessExitCode(code) {
+  if (!Number.isInteger(code)) return String(code ?? '未知')
+  const unsigned = code >>> 0
+  if (unsigned > 0x7fffffff) return `${unsigned - 0x100000000} (0x${unsigned.toString(16).toUpperCase().padStart(8, '0')})`
+  return String(code)
+}
+
 function runPowerShell(script, timeoutMs = 8000) {
   return new Promise((resolve, reject) => {
     const utf8Script = `
@@ -94,7 +101,7 @@ ${script}`
       const stdoutText = decodeProcessOutput(stdout)
       const stderrText = decodeProcessOutput(stderr)
       if (code === 0) resolve(stdoutText)
-      else reject(new Error(stderrText.trim() || `PowerShell 退出代码 ${code}`))
+      else reject(new Error(stderrText.trim() || stdoutText.trim() || `PowerShell 退出代码 ${formatProcessExitCode(code)}`))
     })
   })
 }
@@ -215,6 +222,7 @@ module.exports = {
   decodeProcessOutput,
   findNetstatLines,
   findRoomAddress,
+  formatProcessExitCode,
   inspectVpnNetwork,
   isIPv4InCIDR,
   parseAdapterOutput,
