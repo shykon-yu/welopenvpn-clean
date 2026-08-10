@@ -31,6 +31,7 @@ jobs:
             -DN2N_OPTION_USE_PTHREAD=OFF `
             -DCMAKE_POLICY_DEFAULT_CMP0091=NEW `
             -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded `
+            "-DCMAKE_C_FLAGS_RELEASE=/MT /O2 /Ob2 /DNDEBUG" `
             -DCMAKE_POLICY_VERSION_MINIMUM=3.5
           cmake --build .n2n-build/build --config Release --target edge --parallel 2
           $edge = '.n2n-build/build/Release/edge.exe'
