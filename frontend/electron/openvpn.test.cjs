@@ -42,10 +42,12 @@ test('builds n2n edge arguments from backend-assigned room leases', () => {
     tapName: '以太网 2',
   }), [
     '-d', '以太网 2',
+    '-E',
     '-c', 'wel-10.222.1.0-24',
     '-l', 'game.example.test:25001',
     '-a', '10.222.1.10',
     '-s', '255.255.255.0',
+    '-x', '1',
     '-I', 'room-1-user-5',
   ])
 })

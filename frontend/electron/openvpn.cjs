@@ -387,10 +387,12 @@ function n2nCommunity(roomID, community) {
 function buildEdgeArgs({ host, port, roomID, username, subnetCidr, virtualIP, community, transportKey, tapName }) {
   if (!virtualIP) throw new Error('n2n 房间虚拟 IP 未分配，请重新进入房间')
   const args = [
+    '-E',
     '-c', n2nCommunity(roomID, community),
     '-l', `${host}:${port}`,
     '-a', virtualIP,
     '-s', subnetMaskFromCidr(subnetCidr),
+    '-x', '1',
   ]
   if (tapName) args.unshift('-d', tapName)
   if (transportKey) args.push('-k', transportKey)

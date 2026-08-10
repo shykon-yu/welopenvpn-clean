@@ -1,0 +1,11 @@
+WEL n2n runtime source notice
+
+The bundled edge.exe is built from the official ntop/n2n project:
+https://github.com/ntop/n2n
+
+The Windows build workflow pins the source to the stable 3.0 tag before
+compiling it. n2n is distributed under the GNU General Public License,
+version 3 or later. The corresponding source and license are available from
+the repository above at the pinned tag.
+
+WEL does not include or use fonta0.exe.
