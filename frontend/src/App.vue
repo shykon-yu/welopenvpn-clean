@@ -237,10 +237,12 @@ async function restoreSession() {
 }
 
 function connectDesktopVpn(lease: Lease) {
-  const serverPort = Number(lease.server_port)
+  const configuredPort = Number(import.meta.env.VITE_N2N_PORT ?? 22222)
   return desktop()!.connectVpn({
-    host: import.meta.env.VITE_OPENVPN_HOST ?? lease.server_host,
-    port: Number.isFinite(serverPort) && serverPort > 0 ? serverPort : 22222,
+    host: import.meta.env.VITE_N2N_HOST ?? import.meta.env.VITE_OPENVPN_HOST ?? lease.server_host,
+    // The API's server_port belongs to the former OpenVPN room service. n2n
+    // uses one shared supernode port instead.
+    port: Number.isFinite(configuredPort) && configuredPort > 0 ? configuredPort : 22222,
     username: lease.username,
     roomID: lease.room_id,
     token: getAccessToken(),
@@ -410,7 +412,10 @@ function messageOf(error: unknown) {
 }
 
 onMounted(restoreSession)
-onMounted(refreshDesktopStatus)
+onMounted(async () => {
+  await refreshDesktopStatus()
+  if (desktopStatus.value?.ready) await ensureDesktopReady()
+})
 onBeforeUnmount(() => {
   stopLeaseHeartbeat()
   stopSessionMonitor()

@@ -32,6 +32,17 @@ function locateEdge() {
   return runtimeCandidates().find((candidate) => fs.existsSync(candidate)) || null
 }
 
+function tapInstallerCandidates() {
+  return [
+    path.join(process.resourcesPath || '', 'n2n', 'tap-windows-9.21.2.exe'),
+    path.join(__dirname, '..', 'resources', 'n2n', 'tap-windows-9.21.2.exe'),
+  ].filter(Boolean)
+}
+
+function locateTapInstaller() {
+  return tapInstallerCandidates().find((candidate) => fs.existsSync(candidate)) || null
+}
+
 function tapctlCandidates() {
   return [
     path.join(process.resourcesPath || '', 'n2n', 'tapctl.exe'),
@@ -229,7 +240,7 @@ async function prepare() {
   const tapctl = locateTapctl()
   if (!tapctl) throw new Error('未检测到 WEL 虚拟网卡管理组件，请重新安装客户端')
 
-  const adapters = await listTapAdapters(tapctl)
+  let adapters = await listTapAdapters(tapctl)
   const rememberedGuid = readRememberedTapGuid()
   const adapter = (rememberedGuid
     ? adapters.find(({ guid }) => guid.toLowerCase() === rememberedGuid)
@@ -238,7 +249,35 @@ async function prepare() {
     return { ...current, adapterReady: true, ...(await ensureTapReady(adapter)) }
   }
 
-  throw new Error('未找到 TAP 虚拟网卡，请重新运行完整安装包安装联机组件')
+  const installer = locateTapInstaller()
+  if (!installer) throw new Error('未找到 TAP 虚拟网卡，且绿色版缺少 TAP 驱动安装文件')
+
+  await installBundledTapDriver(installer)
+  adapters = await waitForTapAdapter(tapctl)
+  const installedAdapter = selectWelTapAdapter(adapters)
+  if (!installedAdapter) throw new Error('TAP 虚拟网卡驱动安装后仍未检测到网卡，请重启 Windows 后重试')
+  return { ...current, adapterReady: true, ...(await ensureTapReady(installedAdapter)) }
+}
+
+function installBundledTapDriver(installer) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(installer, ['/S'], { windowsHide: true })
+    child.once('error', reject)
+    child.once('close', (code) => {
+      if ([0, 1641, 3010].includes(Number(code))) resolve()
+      else reject(new Error(`TAP 虚拟网卡驱动安装失败（代码 ${code ?? '未知'}）`))
+    })
+  })
+}
+
+async function waitForTapAdapter(tapctl) {
+  const deadline = Date.now() + 15000
+  while (Date.now() < deadline) {
+    const adapters = await listTapAdapters(tapctl)
+    if (adapters.length > 0) return adapters
+    await wait(500)
+  }
+  return []
 }
 
 function safeFilePart(value) {
@@ -277,6 +316,16 @@ function subnetMaskFromCidr(cidr) {
   if (!Number.isInteger(prefix) || prefix < 0 || prefix > 32) return '255.255.255.0'
   const mask = prefix === 0 ? 0 : (0xffffffff << (32 - prefix)) >>> 0
   return [24, 16, 8, 0].map((shift) => (mask >>> shift) & 255).join('.')
+}
+
+function macFromVirtualIP(virtualIP) {
+  const octets = String(virtualIP || '').split('.').map(Number)
+  if (octets.length !== 4 || octets.some((value) => !Number.isInteger(value) || value < 0 || value > 255)) {
+    throw new Error('n2n 房间虚拟 IP 格式不正确')
+  }
+  return [0x02, 0x57, ...octets]
+    .map((value) => value.toString(16).padStart(2, '0').toUpperCase())
+    .join(':')
 }
 
 function buildConfig({ host, port, username, roomID, subnetCidr, virtualIP, community, transportKey, tapName }) {
@@ -387,11 +436,14 @@ function n2nCommunity(roomID, community) {
 function buildEdgeArgs({ host, port, roomID, username, subnetCidr, virtualIP, community, transportKey, tapName }) {
   if (!virtualIP) throw new Error('n2n 房间虚拟 IP 未分配，请重新进入房间')
   const args = [
+    '-f',
     '-E',
     '-c', n2nCommunity(roomID, community),
     '-l', `${host}:${port}`,
     '-a', virtualIP,
     '-s', subnetMaskFromCidr(subnetCidr),
+    '-m', macFromVirtualIP(virtualIP),
+    '-t', '5645',
     '-x', '1',
   ]
   if (tapName) args.unshift('-d', tapName)
@@ -503,6 +555,7 @@ module.exports = {
   connect,
   isWelTapAdapter,
   isRetryableConnectError,
+  macFromVirtualIP,
   n2nCommunity,
   transportConfigPath,
   parseTapGuid,

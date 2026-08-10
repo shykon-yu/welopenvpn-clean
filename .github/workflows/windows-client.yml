@@ -17,55 +17,25 @@ jobs:
     runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
-      - name: Install MSYS2 build toolchain
-        uses: msys2/setup-msys2@v2
-        with:
-          msystem: MINGW64
-          update: true
-          install: >-
-            git
-            unzip
-            mingw-w64-x86_64-cmake
-            mingw-w64-x86_64-gcc
-            mingw-w64-x86_64-make
-            mingw-w64-x86_64-pkgconf
       - name: Build n2n edge from official source
-        shell: msys2 {0}
+        shell: pwsh
         working-directory: ${{ github.workspace }}
         run: |
-          set -euo pipefail
-          archive_path="third_party/n2n/n2n-${N2N_VERSION}.zip"
-          echo "workspace: $(pwd)"
-          echo "archive: ${archive_path}"
-          test -f "${archive_path}"
-          rm -rf .n2n-build
-          mkdir -p .n2n-build
-          unzip -q "${archive_path}" -d .n2n-build
-          mv ".n2n-build/n2n-${N2N_VERSION}" .n2n-build/source
-          test -d .n2n-build/source
-          rm -rf .n2n-build/build
-          cmake -S .n2n-build/source -B .n2n-build/build \
-            -G "MinGW Makefiles" \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_EXE_LINKER_FLAGS="-static -static-libgcc -static-libstdc++"
-          cmake --build .n2n-build/build --target edge -- -j2
-          test -f .n2n-build/build/edge.exe
-          cp .n2n-build/build/edge.exe frontend/resources/n2n/edge.exe
-          cp .n2n-build/source/COPYING frontend/resources/n2n/n2n-LICENSE.txt
-          cat > frontend/resources/n2n/n2n-source-notice.txt <<EOF
-          WEL n2n runtime source notice
-
-          Source: https://github.com/ntop/n2n
-          Revision: ${N2N_VERSION}
-          License: GNU General Public License, version 3 or later.
-
-          The source corresponding to this binary is available at the source
-          URL above under the pinned revision.
-          EOF
-          if test -f frontend/resources/n2n/fonta0.exe; then
-            echo "fonta0.exe must never be packaged"
-            exit 1
-          fi
+          $ErrorActionPreference = 'Stop'
+          $archive = "third_party/n2n/n2n-$env:N2N_VERSION.zip"
+          if (-not (Test-Path $archive)) { throw "Missing n2n source archive: $archive" }
+          Remove-Item .n2n-build -Recurse -Force -ErrorAction SilentlyContinue
+          Expand-Archive -LiteralPath $archive -DestinationPath .n2n-build
+          Move-Item ".n2n-build/n2n-$env:N2N_VERSION" .n2n-build/source
+          cmake -S .n2n-build/source -B .n2n-build/build -A x64 `
+            -DN2N_OPTION_USE_PTHREAD=OFF `
+            -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
+          cmake --build .n2n-build/build --config Release --target edge --parallel 2
+          $edge = '.n2n-build/build/Release/edge.exe'
+          if (-not (Test-Path $edge)) { throw "n2n edge build output missing: $edge" }
+          Copy-Item $edge frontend/resources/n2n/edge.exe -Force
+          Copy-Item .n2n-build/source/COPYING frontend/resources/n2n/n2n-LICENSE.txt -Force
+          if (Test-Path frontend/resources/n2n/fonta0.exe) { throw 'fonta0.exe must never be packaged' }
       - uses: actions/setup-node@v4
         with:
           node-version: 18

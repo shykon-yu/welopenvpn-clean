@@ -11,6 +11,7 @@ const {
   buildEdgeArgs,
   isWelTapAdapter,
   isRetryableConnectError,
+  macFromVirtualIP,
   n2nCommunity,
   parseTapGuid,
   parseTapctlList,
@@ -42,19 +43,30 @@ test('builds n2n edge arguments from backend-assigned room leases', () => {
     tapName: '以太网 2',
   }), [
     '-d', '以太网 2',
+    '-f',
     '-E',
     '-c', 'wel-10.222.1.0-24',
     '-l', 'game.example.test:22222',
     '-a', '10.222.1.10',
     '-s', '255.255.255.0',
+    '-m', '02:57:0A:DE:01:0A',
+    '-t', '5645',
     '-x', '1',
     '-I', 'room-1-user-5',
   ])
 })
 
+test('uses a stable locally administered MAC for each virtual IP', () => {
+  assert.equal(macFromVirtualIP('10.222.1.10'), '02:57:0A:DE:01:0A')
+  assert.equal(macFromVirtualIP('10.222.1.11'), '02:57:0A:DE:01:0B')
+  assert.throws(() => macFromVirtualIP('10.222.1.999'), /格式不正确/)
+})
+
 test('does not generate OpenVPN client configuration while connecting', () => {
   const client = fs.readFileSync(path.join(__dirname, 'openvpn.cjs'), 'utf8')
   assert.match(client, /path\.join\(resources, 'n2n', 'edge\.exe'\)/)
+  assert.match(client, /tap-windows-9\.21\.2\.exe/)
+  assert.match(client, /installBundledTapDriver/)
   assert.match(client, /'-a', virtualIP/)
   assert.match(client, /'-d', tapName/)
   assert.match(client, /stopStaleWelN2nProcesses/)
@@ -137,4 +149,13 @@ test('opens the remembered TAP adapter without creating or deleting adapters', (
   assert.match(client, /listTapAdaptersFromWmi/)
   assert.match(client, /ServiceName -eq 'tap0901'/)
   assert.match(client, /await prepare\(\)/)
+})
+
+test('green editions install TAP only when no tap0901 adapter exists', () => {
+  const client = fs.readFileSync(path.join(__dirname, 'openvpn.cjs'), 'utf8')
+  assert.match(client, /let adapters = await listTapAdapters\(tapctl\)/)
+  assert.match(client, /if \(adapter\) \{\s*return \{ \.\.\.current, adapterReady: true/)
+  assert.match(client, /const installer = locateTapInstaller\(\)/)
+  assert.match(client, /await installBundledTapDriver\(installer\)/)
+  assert.doesNotMatch(client, /runTapctl\(tapctl, \['delete'/)
 })

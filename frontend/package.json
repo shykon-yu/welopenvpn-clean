@@ -1,7 +1,7 @@
 {
   "name": "wel-openvpn-client",
   "private": true,
-  "version": "0.1.68",
+  "version": "0.1.69",
   "packageManager": "pnpm@11.11.0",
   "type": "module",
   "main": "electron/main.cjs",
@@ -49,6 +49,10 @@
       {
         "from": "resources/openvpn/bin/tapctl.exe",
         "to": "n2n/tapctl.exe"
+      },
+      {
+        "from": "build/tap-windows-9.21.2.exe",
+        "to": "n2n/tap-windows-9.21.2.exe"
       }
     ],
     "win": {
@@ -70,7 +74,7 @@
       "perMachine": true,
       "allowElevation": true,
       "allowToChangeInstallationDirectory": true,
-      "shortcutName": "WEL职业联盟对战平台 v0.1.68",
+      "shortcutName": "WEL职业联盟对战平台 v0.1.69",
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true
     }

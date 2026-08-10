@@ -6,7 +6,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 EnvironmentFile=/etc/weln2n.env
-ExecStart=/usr/local/bin/supernode -p ${N2N_PORT:-22222}
+ExecStart=/usr/local/bin/supernode -f -p ${N2N_PORT}
 Restart=always
 RestartSec=3
 
