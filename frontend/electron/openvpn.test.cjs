@@ -43,6 +43,7 @@ test('builds n2n edge arguments from backend-assigned room leases', () => {
   }), [
     '-d', '{11111111-2222-3333-4444-555555555555}',
     '-E',
+    '-S1',
     '-c', 'wel-10.222.1.0-24',
     '-l', 'game.example.test:22222',
     '-a', '10.222.1.10/24',
@@ -59,6 +60,7 @@ test('does not generate OpenVPN client configuration while connecting', () => {
   assert.match(client, /'-a', `\$\{virtualIP\}\/\$\{prefixFromCidr\(subnetCidr\)\}`/)
   assert.match(client, /'-d', tapName/)
   assert.match(client, /ensureEdgeFirewall\(executable\)/)
+  assert.match(client, /protocol=icmpv4:8,any remoteip=10\.222\.0\.0\/16/)
   assert.match(client, /stopStaleWelN2nProcesses/)
   assert.doesNotMatch(client, /'ip-win32 dynamic'/)
   assert.doesNotMatch(client, /'dev-type tap'/)
@@ -182,4 +184,11 @@ test('green editions install TAP only when no enumerated TAP adapter exists', ()
   assert.match(client, /find\(\(\{ guid \}\) => Boolean\(parseTapGuid\(guid\)\)\)/)
   assert.doesNotMatch(client, /const owned = adapters\.filter\(\(\{ name \}\)/)
   assert.doesNotMatch(client, /runTapctl\(tapctl, \['delete'/)
+})
+
+test('caches the selected TAP so room connection does not enumerate it twice', () => {
+  const client = fs.readFileSync(path.join(__dirname, 'openvpn.cjs'), 'utf8')
+  assert.match(client, /let preparedTap = null/)
+  assert.match(client, /if \(preparedTap\?\.tapNode\) \{\s*return \{ \.\.\.current, adapterReady: true, \.\.\.preparedTap \}/)
+  assert.match(client, /preparedTap = \{ tapName: enabledAdapter\.name, tapNode: enabledAdapter\.guid, tapGuid: enabledAdapter\.guid \}/)
 })

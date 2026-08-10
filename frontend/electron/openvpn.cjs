@@ -18,6 +18,7 @@ const INSTALLER_TAP_STATE_PATH = path.join(process.env.PROGRAMDATA || 'C:\\Progr
 const STOP_TIMEOUT_MS = 3000
 
 let connection = null
+let preparedTap = null
 
 function runtimeCandidates() {
   const resources = process.resourcesPath || ''
@@ -141,7 +142,8 @@ function rememberTapAdapter(adapter) {
 async function ensureTapReady(adapter) {
   const enabledAdapter = await ensureTapEnabled(adapter)
   rememberTapAdapter(enabledAdapter)
-  return { tapName: enabledAdapter.name, tapNode: enabledAdapter.guid, tapGuid: enabledAdapter.guid }
+  preparedTap = { tapName: enabledAdapter.name, tapNode: enabledAdapter.guid, tapGuid: enabledAdapter.guid }
+  return preparedTap
 }
 
 function selectWelTapAdapter(adapters) {
@@ -236,6 +238,9 @@ async function prepare() {
   const current = status()
   if (!current.ready) throw new Error(current.message)
   if (process.platform !== 'win32') return current
+  if (preparedTap?.tapNode) {
+    return { ...current, adapterReady: true, ...preparedTap }
+  }
 
   const tapctl = locateTapctl()
   if (!tapctl) throw new Error('未检测到 WEL 虚拟网卡管理组件，请重新安装客户端')
@@ -401,6 +406,7 @@ function wait(ms) {
 async function ensureEdgeFirewall(executable) {
   if (process.platform !== 'win32') return
   const ruleName = 'WEL n2n edge inbound'
+  const pingRuleName = 'WEL Virtual LAN ICMPv4'
   const escapedExecutable = String(executable || '').replace(/'/g, "''")
   try {
     await runPowerShell(`
@@ -408,9 +414,13 @@ $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
 $principal = New-Object Security.Principal.WindowsPrincipal($identity)
 if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { exit 3 }
 $ruleName = '${ruleName}'
+$pingRuleName = '${pingRuleName}'
 & netsh.exe advfirewall firewall delete rule name=$ruleName | Out-Null
 & netsh.exe advfirewall firewall add rule name=$ruleName dir=in action=allow enable=yes profile=any protocol=UDP program='${escapedExecutable}' | Out-Null
 if ($LASTEXITCODE -ne 0) { exit 4 }
+& netsh.exe advfirewall firewall delete rule name=$pingRuleName | Out-Null
+& netsh.exe advfirewall firewall add rule name=$pingRuleName dir=in action=allow enable=yes profile=any protocol=icmpv4:8,any remoteip=10.222.0.0/16 | Out-Null
+if ($LASTEXITCODE -ne 0) { exit 5 }
 `, 8000)
   } catch {
     // Non-elevated clients keep the normal Windows firewall confirmation flow.
@@ -452,6 +462,7 @@ function buildEdgeArgs({ host, port, roomID, username, subnetCidr, virtualIP, co
   if (!virtualIP) throw new Error('n2n 房间虚拟 IP 未分配，请重新进入房间')
   const args = [
     '-E',
+    '-S1',
     '-c', n2nCommunity(roomID, community),
     '-l', `${host}:${port}`,
     '-a', `${virtualIP}/${prefixFromCidr(subnetCidr)}`,
