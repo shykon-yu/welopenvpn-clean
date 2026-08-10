@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, dialog, ipcMain } = require('electron')
+const { app, BrowserWindow, Menu, Tray, nativeImage, dialog, ipcMain } = require('electron')
 const { spawn } = require('node:child_process')
 const fs = require('node:fs')
 const path = require('node:path')
@@ -17,6 +17,7 @@ const LOG_DIRECTORY = path.join(process.env.LOCALAPPDATA || app.getPath('userDat
 const LOG_FILE = path.join(LOG_DIRECTORY, 'main.log')
 
 let mainWindow = null
+let tray = null
 let isQuitting = false
 let vpnShutdownComplete = false
 
@@ -50,9 +51,9 @@ function createWindow() {
     webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: false },
   })
   mainWindow.on('close', (event) => {
-    if (isQuitting) return
+    if (isQuitting || process.platform !== 'win32') return
     event.preventDefault()
-    mainWindow.minimize()
+    mainWindow.hide()
   })
   mainWindow.on('closed', () => { mainWindow = null })
   mainWindow.webContents.on('render-process-gone', (_event, details) => {
@@ -68,6 +69,42 @@ function createWindow() {
     showFatalError(error)
     app.quit()
   })
+}
+
+function showMainWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) return
+  if (mainWindow.isMinimized()) mainWindow.restore()
+  mainWindow.show()
+  mainWindow.focus()
+}
+
+function trayIconPath() {
+  const candidates = app.isPackaged
+    ? [path.join(process.resourcesPath, 'welhelper', 'wel.ico')]
+    : [path.join(__dirname, '..', 'build', 'icon.ico')]
+  return candidates.find((candidate) => fs.existsSync(candidate)) || null
+}
+
+function createTray() {
+  if (process.platform !== 'win32' || tray) return
+  const iconPath = trayIconPath()
+  if (!iconPath) {
+    writeLog('未找到系统托盘图标')
+    return
+  }
+  const icon = nativeImage.createFromPath(iconPath)
+  if (icon.isEmpty()) {
+    writeLog(`系统托盘图标无法加载：${iconPath}`)
+    return
+  }
+  tray = new Tray(icon)
+  tray.setToolTip(`WEL职业联盟对战平台 v${appVersion}`)
+  tray.setContextMenu(Menu.buildFromTemplate([
+    { label: '打开主界面', click: showMainWindow },
+    { type: 'separator' },
+    { label: '退出平台', click: () => { isQuitting = true; app.quit() } },
+  ]))
+  tray.on('double-click', showMainWindow)
 }
 
 function createChineseMenu() {
@@ -159,6 +196,7 @@ app.whenReady()
     process.env.VITE_API_BASE_URL = API_URL
     createChineseMenu()
     createWindow()
+    createTray()
     writeLog('主窗口已创建')
   })
   .catch((error) => {
@@ -174,4 +212,4 @@ app.on('before-quit', (event) => {
     app.quit()
   })
 })
-app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit() })
+app.on('window-all-closed', () => { if (process.platform !== 'darwin' && isQuitting) app.quit() })

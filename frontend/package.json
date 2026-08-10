@@ -1,14 +1,14 @@
 {
   "name": "wel-openvpn-client",
   "private": true,
-  "version": "0.1.85",
+  "version": "0.1.86",
   "packageManager": "pnpm@11.11.0",
   "type": "module",
   "main": "electron/main.cjs",
   "scripts": {
     "dev": "vite --host 0.0.0.0",
     "build": "vue-tsc --noEmit && vite build",
-    "test:electron": "node --test electron/network.test.cjs electron/installer.test.cjs electron/openvpn.test.cjs electron/firewall.test.cjs",
+    "test:electron": "node --test electron/network.test.cjs electron/installer.test.cjs electron/openvpn.test.cjs electron/firewall.test.cjs electron/main.test.cjs",
     "electron:dev": "npm run build && electron electron/main.cjs",
     "electron:build": "npm run build && electron-builder --win nsis",
     "electron": "electron"
@@ -53,6 +53,10 @@
       {
         "from": "build/tap-windows-9.21.2.exe",
         "to": "welhelper/weltap.exe"
+      },
+      {
+        "from": "build/icon.ico",
+        "to": "welhelper/wel.ico"
       }
     ],
     "win": {
@@ -74,7 +78,7 @@
       "perMachine": true,
       "allowElevation": true,
       "allowToChangeInstallationDirectory": true,
-      "shortcutName": "WEL职业联盟对战平台 v0.1.85",
+      "shortcutName": "WEL职业联盟对战平台 v0.1.86",
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true
     }

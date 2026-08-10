@@ -43,14 +43,18 @@ test('builds n2n edge arguments from backend-assigned room leases', () => {
     virtualIP: '10.222.1.10',
     community: 'wel-10.222.1.0-24',
     tapName: '{11111111-2222-3333-4444-555555555555}',
+    transportBindIP: '192.168.3.124',
   }), [
     '-d', '{11111111-2222-3333-4444-555555555555}',
     '-E',
     '-S1',
+    '-x', '1',
     '-c', 'wel-10.222.1.0-24',
     '-l', 'game.example.test:22222',
     '-a', '10.222.1.10/24',
     '-t', '5645',
+    '-p', '192.168.3.124',
+    '-e', '192.168.3.124',
     '-I', 'room-1-user-5',
   ])
 })
@@ -61,6 +65,9 @@ test('does not generate OpenVPN client configuration while connecting', () => {
   assert.match(client, /'welhelper', 'weltap\.exe'/)
   assert.match(client, /installBundledTapDriver/)
   assert.match(client, /'-a', `\$\{virtualIP\}\/\$\{prefixFromCidr\(subnetCidr\)\}`/)
+  assert.match(client, /'-x', '1'/)
+  assert.match(client, /'-p', transportBindIP/)
+  assert.match(client, /'-e', transportBindIP/)
   assert.match(client, /'-d', tapName/)
   assert.match(client, /ensureEdgeFirewall\(executable\)/)
   assert.match(client, /stopStaleWelN2nProcesses/)

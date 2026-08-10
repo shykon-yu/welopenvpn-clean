@@ -415,7 +415,7 @@ function prefixFromCidr(cidr) {
   return prefix
 }
 
-function buildConfig({ host, port, username, roomID, subnetCidr, virtualIP, community, transportKey, tapName }) {
+function buildConfig({ host, port, username, roomID, subnetCidr, virtualIP, community, transportKey, tapName, transportBindIP }) {
   const runtime = ensureRuntimeDirectory()
   const prefix = `room-${safeFilePart(roomID)}-${safeFilePart(username)}`
   const configPath = path.join(runtime, `${prefix}.n2n.txt`)
@@ -427,6 +427,7 @@ function buildConfig({ host, port, username, roomID, subnetCidr, virtualIP, comm
     `virtual_ip=${virtualIP}`,
     `netmask=${subnetMaskFromCidr(subnetCidr)}`,
     `tap_name=${tapName || ''}`,
+    `transport_bind_ip=${transportBindIP || 'auto'}`,
     `identity=${username}`,
     `room_id=${roomID}`,
   ].join('\r\n') + '\r\n'
@@ -489,6 +490,62 @@ function wait(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
+function escapePowerShellString(value) {
+  return String(value || '').replace(/'/g, "''")
+}
+
+async function findBestTransportIPv4(remoteHost) {
+  if (process.platform !== 'win32') return null
+  const target = escapePowerShellString(remoteHost || DEFAULT_HOST)
+  try {
+    const output = await runPowerShell(`
+function Convert-IPv4($value) {
+  $parts = ([string]$value).Split('.') | ForEach-Object { [uint64]$_ }
+  if ($parts.Count -ne 4) { return $null }
+  return ($parts[0] * 16777216) + ($parts[1] * 65536) + ($parts[2] * 256) + $parts[3]
+}
+
+$targetAddresses = @([System.Net.Dns]::GetHostAddresses('${target}') |
+  Where-Object { $_.AddressFamily -eq [System.Net.Sockets.AddressFamily]::InterNetwork })
+if ($targetAddresses.Count -eq 0) { exit 2 }
+$targetNumber = Convert-IPv4 $targetAddresses[0].IPAddressToString
+
+$routes = @(Get-WmiObject Win32_IP4RouteTable -ErrorAction Stop |
+  Where-Object { $_.Destination -and $_.Mask -and $_.InterfaceIndex -gt 0 } |
+  ForEach-Object {
+    $destination = Convert-IPv4 $_.Destination
+    $mask = Convert-IPv4 $_.Mask
+    if ($null -eq $destination -or $null -eq $mask) { return }
+    if (($targetNumber -band $mask) -ne ($destination -band $mask)) { return }
+    $bits = $mask
+    $prefix = 0
+    while ($bits -gt 0) {
+      $prefix += ($bits -band 1)
+      $bits = $bits -shr 1
+    }
+    [PSCustomObject]@{
+      InterfaceIndex = [int]$_.InterfaceIndex
+      PrefixLength = $prefix
+      Metric = [int]$_.Metric1
+    }
+  } | Sort-Object -Property @{Expression='PrefixLength';Descending=$true}, @{Expression='Metric';Ascending=$true})
+
+foreach ($route in $routes) {
+  $configs = @(Get-WmiObject Win32_NetworkAdapterConfiguration -ErrorAction SilentlyContinue |
+    Where-Object { $_.InterfaceIndex -eq $route.InterfaceIndex -and $_.IPEnabled -and $_.DefaultIPGateway })
+  foreach ($config in $configs) {
+    $address = @($config.IPAddress | Where-Object { $_ -match '^\\d{1,3}(?:\\.\\d{1,3}){3}$' }) | Select-Object -First 1
+    if ($address) { [Console]::Out.WriteLine($address); exit 0 }
+  }
+}
+exit 3
+`, 8000)
+    return String(output || '').trim().split(/\r?\n/).find((line) => /^\d{1,3}(?:\.\d{1,3}){3}$/.test(line.trim())) || null
+  } catch {
+    return null
+  }
+}
+
 function isRetryableConnectError(error) {
   return /连接超时：未获取虚拟 IP|TAP|adapter|网卡|CreateFile|DeviceIoControl/i.test(String(error?.message || error || ''))
 }
@@ -520,23 +577,25 @@ function n2nCommunity(roomID, community) {
   return value || `wel-room-${roomID}`
 }
 
-function buildEdgeArgs({ host, port, roomID, username, subnetCidr, virtualIP, community, transportKey, tapName }) {
+function buildEdgeArgs({ host, port, roomID, username, subnetCidr, virtualIP, community, transportKey, tapName, transportBindIP }) {
   if (!virtualIP) throw new Error('n2n 房间虚拟 IP 未分配，请重新进入房间')
   const args = [
     '-E',
     '-S1',
+    '-x', '1',
     '-c', n2nCommunity(roomID, community),
     '-l', `${host}:${port}`,
     '-a', `${virtualIP}/${prefixFromCidr(subnetCidr)}`,
     '-t', '5645',
   ]
+  if (transportBindIP) args.push('-p', transportBindIP, '-e', transportBindIP)
   if (tapName) args.unshift('-d', tapName)
   if (transportKey) args.push('-k', transportKey)
   if (username) args.push('-I', username)
   return args
 }
 
-async function connectAttempt({ executable, host, port, roomID, username, subnetCidr, virtualIP, community, transportKey, tapName }) {
+async function connectAttempt({ executable, host, port, roomID, username, subnetCidr, virtualIP, community, transportKey, tapName, transportBindIP }) {
   await stopConnection()
   const files = buildConfig({
     host: host || DEFAULT_HOST,
@@ -548,6 +607,7 @@ async function connectAttempt({ executable, host, port, roomID, username, subnet
     community,
     transportKey,
     tapName,
+    transportBindIP,
   })
   const edgeArgs = buildEdgeArgs({
     host: host || DEFAULT_HOST,
@@ -559,6 +619,7 @@ async function connectAttempt({ executable, host, port, roomID, username, subnet
     community,
     transportKey,
     tapName,
+    transportBindIP,
   })
   const child = spawn(executable, edgeArgs, {
     windowsHide: true,
@@ -614,6 +675,7 @@ async function connect({ host, port, roomID, username, subnetCidr, virtualIP, co
   await wait(500)
   const prepared = await prepare()
   const tapNode = prepared.tapNode
+  const transportBindIP = await findBestTransportIPv4(host || DEFAULT_HOST)
   try {
     await ensureEdgeFirewall(executable)
   } catch {
@@ -623,7 +685,7 @@ async function connect({ host, port, roomID, username, subnetCidr, virtualIP, co
   let lastError = null
   for (let attempt = 1; attempt <= CONNECT_MAX_ATTEMPTS; attempt += 1) {
     try {
-      return await connectAttempt({ executable, host, port, roomID, username, subnetCidr, virtualIP, community, transportKey, tapName: tapNode })
+      return await connectAttempt({ executable, host, port, roomID, username, subnetCidr, virtualIP, community, transportKey, tapName: tapNode, transportBindIP })
     } catch (error) {
       lastError = error
       if (attempt >= CONNECT_MAX_ATTEMPTS || !isRetryableConnectError(error)) throw error
