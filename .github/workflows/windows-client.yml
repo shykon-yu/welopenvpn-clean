@@ -15,9 +15,6 @@ env:
 jobs:
   build:
     runs-on: windows-2022
-    defaults:
-      run:
-        working-directory: frontend
     steps:
       - uses: actions/checkout@v4
       - name: Extract bundled official n2n source archive
@@ -25,8 +22,9 @@ jobs:
         working-directory: ${{ github.workspace }}
         run: |
           $ErrorActionPreference = 'Stop'
+          $archiveName = "n2n-$($env:N2N_VERSION).zip"
           $buildRoot = Join-Path $env:GITHUB_WORKSPACE '.n2n-build'
-          $archivePath = Join-Path $env:GITHUB_WORKSPACE "third_party/n2n/n2n-$env:N2N_VERSION.zip"
+          $archivePath = Join-Path $env:GITHUB_WORKSPACE "third_party/n2n/$archiveName"
           Write-Host "Workspace: $env:GITHUB_WORKSPACE"
           Write-Host "Archive: $archivePath"
           if (-not (Test-Path $archivePath)) {
@@ -85,11 +83,14 @@ jobs:
         with:
           node-version: 18
       - name: Install dependencies
+        working-directory: frontend
         run: npm install --legacy-peer-deps --ignore-scripts
       - name: Test Electron helpers
+        working-directory: frontend
         run: npm run test:electron
       - name: Check Windows PowerShell scripts
         shell: pwsh
+        working-directory: frontend
         run: |
           $failed = $false
           Get-ChildItem build -Filter '*.ps1' | ForEach-Object {
@@ -103,9 +104,11 @@ jobs:
           }
           if ($failed) { throw 'Windows PowerShell 脚本语法检查失败' }
       - name: Build frontend
+        working-directory: frontend
         run: npm run build
       - name: Check release runtime
         shell: pwsh
+        working-directory: frontend
         run: |
           $required = @(
             '../third_party/n2n/n2n-3.0.zip',
@@ -123,6 +126,7 @@ jobs:
             throw '禁止将 fonta0.exe 打进 WEL 安装包'
           }
       - name: Build NSIS installer
+        working-directory: frontend
         run: npx electron-builder --win nsis
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: false
