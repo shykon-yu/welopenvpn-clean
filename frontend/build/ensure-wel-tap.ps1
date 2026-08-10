@@ -12,16 +12,16 @@ if (-not (Test-Path -LiteralPath $TapctlPath)) {
 function Get-TapAdapters {
   @(Get-WmiObject -Class Win32_NetworkAdapter -ErrorAction SilentlyContinue |
     Where-Object {
-      $_.ServiceName -eq 'tap0901' -or
-      $_.PNPDeviceID -match 'TAP0901'
+      $_.ServiceName -match '^(?i:tap0?(801|901))$' -or
+      $_.PNPDeviceID -match '(?i)TAP0?(801|901)' -or
+      $_.Name -match '(?i)TAP-Windows Adapter|OpenVPN TAP-Windows|WEL TAP'
     })
 }
 
 # Keep the Windows-assigned connection name such as Ethernet/Local Area
 # Connection. The client opens the adapter by GUID, so renaming is unnecessary.
 $tapAdapters = @(Get-TapAdapters)
-$existingTapAdapter = $tapAdapters | Select-Object -First 1
-if ($existingTapAdapter.Count -ge 1) {
+if ($tapAdapters.Count -gt 0) {
   exit 0
 }
 

@@ -103,12 +103,17 @@ test('parses and reuses Windows-assigned WEL network connection names', () => {
   assert.equal(isWelTapAdapter('本地连接 17'), true)
   assert.equal(isWelTapAdapter('WEL Virtual LAN'), true)
   assert.equal(isWelTapAdapter('WEL Virtual LAN 2'), true)
+  assert.equal(isWelTapAdapter('TAP-Windows Adapter V9 #2'), true)
+  assert.equal(isWelTapAdapter('TAP-Windows Adapter V9 #3'), true)
   assert.equal(isWelTapAdapter('Other TAP 17'), false)
   assert.equal(selectWelTapAdapter(adapters).name, '以太网')
   assert.equal(selectWelTapAdapter(adapters.slice(1)).name, '本地连接 17')
   assert.equal(selectWelTapAdapter([
     { guid: '{BBBBBBBB-BBBB-BBBB-BBBB-BBBBBBBBBBBB}', name: 'WEL Virtual LAN 2' },
   ]).name, 'WEL Virtual LAN 2')
+  assert.equal(selectWelTapAdapter([
+    { guid: '{DDDDDDDD-DDDD-DDDD-DDDD-DDDDDDDDDDDD}', name: 'TAP-Windows Adapter V9 #3' },
+  ]).name, 'TAP-Windows Adapter V9 #3')
   assert.equal(parseTapGuid('Adapter {CCCCCCCC-CCCC-CCCC-CCCC-CCCCCCCCCCCC} created'), '{cccccccc-cccc-cccc-cccc-cccccccccccc}')
 })
 
@@ -137,7 +142,8 @@ test('opens the remembered TAP adapter without creating or deleting adapters', (
   assert.match(client, /readRememberedTapGuid\(\)/)
   assert.match(client, /INSTALLER_TAP_STATE_PATH/)
   assert.match(client, /listTapAdaptersFromWmi/)
-  assert.match(client, /ServiceName -eq 'tap0901'/)
+  assert.match(client, /ServiceName -match '[^']*tap0\?\(801\|901\)/)
+  assert.match(client, /Name -match '[^']*TAP-Windows Adapter/)
   assert.match(client, /await prepare\(\)/)
 })
 

@@ -7,7 +7,7 @@ const { inspectVpnNetwork, runPowerShell, waitForVpnNetwork } = require('./netwo
 const DEFAULT_HOST = '8.133.189.9'
 const DEFAULT_PORT = 22222
 const TAP_NAME = 'TAP-Windows Adapter V9'
-const WEL_TAP_NAME = /^(?:WEL Virtual LAN|WEL TAP|TAP-Windows Adapter V9|OpenVPN TAP-Windows6|以太网|本地连接)(?: \d+)?$/i
+const WEL_TAP_NAME = /^(?:WEL Virtual LAN|WEL TAP|TAP-Windows Adapter V9|OpenVPN TAP-Windows6|以太网|本地连接)(?: \d+| #\d+)?$/i
 const N2N_PROGRESS = /(?:supernode|register|edge|tuntap|wintap|tap|peer|packet|created local tap|successfully joined)/i
 const CONNECT_TIMEOUT_MS = 45000
 const CONNECT_MAX_ATTEMPTS = 4
@@ -192,8 +192,9 @@ function Encode-Value($value) {
 Get-WmiObject -Class Win32_NetworkAdapter -ErrorAction SilentlyContinue |
   Where-Object {
     $_.GUID -and (
-      $_.ServiceName -eq 'tap0901' -or
-      $_.PNPDeviceID -match 'TAP0901'
+      $_.ServiceName -match '^(?i:tap0?(801|901))$' -or
+      $_.PNPDeviceID -match '(?i)TAP0?(801|901)' -or
+      $_.Name -match '(?i)TAP-Windows Adapter|OpenVPN TAP-Windows|WEL TAP'
     )
   } |
   ForEach-Object {
