@@ -5,6 +5,9 @@ export type DesktopLease = {
   subnetCidr: string
   roomID: number
   token: string
+  virtualIP: string
+  community?: string
+  transportKey?: string
 }
 
 export type DesktopLeaseStatus = {
@@ -22,6 +25,7 @@ export type DesktopStatus = {
   ready: boolean
   message: string
   openvpnInstalled: boolean
+  n2nInstalled?: boolean
   tapName?: string
 }
 

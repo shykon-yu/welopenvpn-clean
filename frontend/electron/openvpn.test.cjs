@@ -3,83 +3,86 @@ const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
 const os = require('node:os')
-const { CONNECT_MAX_ATTEMPTS, CONNECT_TIMEOUT_MS, OPENVPN_DATA_CIPHERS, OPENVPN_FALLBACK_CIPHER, OPENVPN_PROGRESS, OPENVPN_REMOTE_CERT_EKU, isWelTapAdapter, isRetryableConnectError, openVpnConfigPath, parseTapGuid, parseTapctlList, parseWmiTapAdapters, readRecentLog, selectWelTapAdapter } = require('./openvpn.cjs')
+const {
+  CONNECT_MAX_ATTEMPTS,
+  CONNECT_TIMEOUT_MS,
+  DEFAULT_PORT,
+  N2N_PROGRESS,
+  buildEdgeArgs,
+  isWelTapAdapter,
+  isRetryableConnectError,
+  n2nCommunity,
+  parseTapGuid,
+  parseTapctlList,
+  parseWmiTapAdapters,
+  readRecentLog,
+  selectWelTapAdapter,
+  transportConfigPath,
+} = require('./openvpn.cjs')
 
-test('uses OpenVPN-safe paths in generated config values', () => {
+test('uses n2n-safe paths in generated runtime values', () => {
   assert.equal(
-    openVpnConfigPath('C:\\Users\\Administrator\\AppData\\Local\\WELPlatform\\runtime\\room.auth'),
-    'C:/Users/Administrator/AppData/Local/WELPlatform/runtime/room.auth',
+    transportConfigPath('C:\\Users\\Administrator\\AppData\\Local\\WELPlatform\\runtime\\room.n2n.txt'),
+    'C:/Users/Administrator/AppData/Local/WELPlatform/runtime/room.n2n.txt',
   )
 })
 
-test('sends explicit exit notify to shrink stale UDP sessions on reconnect', () => {
-  const client = fs.readFileSync(path.join(__dirname, 'openvpn.cjs'), 'utf8')
-  assert.match(client, /'explicit-exit-notify 1'/)
+test('builds n2n edge arguments from backend-assigned room leases', () => {
+  assert.equal(DEFAULT_PORT, 25001)
+  assert.equal(n2nCommunity(1, ''), 'wel-room-1')
+  assert.equal(n2nCommunity(1, 'wel-10.222.1.0-24'), 'wel-10.222.1.0-24')
+  assert.deepEqual(buildEdgeArgs({
+    host: 'game.example.test',
+    port: 25001,
+    roomID: 1,
+    username: 'room-1-user-5',
+    subnetCidr: '10.222.1.0/24',
+    virtualIP: '10.222.1.10',
+    community: 'wel-10.222.1.0-24',
+    tapName: '以太网 2',
+  }), [
+    '-d', '以太网 2',
+    '-c', 'wel-10.222.1.0-24',
+    '-l', 'game.example.test:25001',
+    '-a', '10.222.1.10',
+    '-s', '255.255.255.0',
+    '-I', 'room-1-user-5',
+  ])
 })
 
-test('lets OpenVPN apply TAP addresses through DHCP emulation', () => {
+test('does not generate OpenVPN client configuration while connecting', () => {
   const client = fs.readFileSync(path.join(__dirname, 'openvpn.cjs'), 'utf8')
-  assert.match(client, /'ip-win32 dynamic'/)
-  assert.match(client, /'dev-type tap'/)
-  assert.doesNotMatch(client, /'dev tap'/)
+  assert.match(client, /path\.join\(resources, 'n2n', 'edge\.exe'\)/)
+  assert.match(client, /'-a', virtualIP/)
+  assert.match(client, /'-d', tapName/)
+  assert.match(client, /stopStaleWelN2nProcesses/)
+  assert.doesNotMatch(client, /'ip-win32 dynamic'/)
+  assert.doesNotMatch(client, /'dev-type tap'/)
   assert.doesNotMatch(client, /route-nopull/)
-  assert.doesNotMatch(client, /pull-filter ignore redirect-gateway/)
-  assert.doesNotMatch(client, /pull-filter ignore dhcp-option/)
+  assert.doesNotMatch(client, /remote-cert-eku/)
 })
 
-test('does not change routes or firewall rules while connecting', () => {
-  const client = fs.readFileSync(path.join(__dirname, 'openvpn.cjs'), 'utf8')
-  assert.doesNotMatch(client, /route\.exe/)
-  assert.doesNotMatch(client, /ensureTapUdpFirewall/)
-  assert.doesNotMatch(client, /removeLegacyWe8BroadcastFirewall/)
-})
-
-test('keeps client and server cipher settings aligned', () => {
-  const generator = fs.readFileSync(path.join(__dirname, '..', '..', 'deploy', 'openvpn', 'generate-room-configs.sh'), 'utf8')
-  assert.match(generator, new RegExp(`data-ciphers ${OPENVPN_DATA_CIPHERS.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`))
-  assert.match(generator, new RegExp(`data-ciphers-fallback ${OPENVPN_FALLBACK_CIPHER}`))
-  assert.match(generator, new RegExp(`cipher ${OPENVPN_FALLBACK_CIPHER}`))
-  assert.match(generator, /setenv WEL_ROOM_ID \$\{room_id\}/)
-  assert.match(generator, /setenv WEL_API_BASE_URL \$\{api_base\}/)
-  assert.match(generator, /client-connect \/etc\/welopenvpn\/auth\/sync-lease\.sh/)
-  assert.match(generator, /client-disconnect \/etc\/welopenvpn\/auth\/sync-lease\.sh/)
-})
-
-test('verifies room leases without pinning backend-assigned VPN IPs', () => {
-  const verifier = fs.readFileSync(path.join(__dirname, '..', '..', 'deploy', 'openvpn', 'auth', 'verify-lease.sh'), 'utf8')
-  assert.match(verifier, /room_id.*\^\[1-6\]\$/)
-  assert.doesNotMatch(verifier, /ifconfig-push/)
-  assert.doesNotMatch(verifier, /virtual_ip=.*lease\.virtual_ip/)
-  assert.doesNotMatch(verifier, /\^10\\\.80\\\./)
-})
-
-test('checks server certificate EKU without requiring missing key usage extension', () => {
-  const client = fs.readFileSync(path.join(__dirname, 'openvpn.cjs'), 'utf8')
-  assert.match(client, new RegExp(`remote-cert-eku "\\$\\{OPENVPN_REMOTE_CERT_EKU\\}"`))
-  assert.equal(OPENVPN_REMOTE_CERT_EKU, 'TLS Web Server Authentication')
-  assert.doesNotMatch(client, /remote-cert-tls server/)
-})
-
-test('reads the latest openvpn log tail safely', () => {
-  const tempPath = path.join(os.tmpdir(), `wel-openvpn-${Date.now()}.log`)
-  fs.writeFileSync(tempPath, 'first line\r\nInitialization Sequence Completed\r\n', 'utf8')
-  assert.match(readRecentLog(tempPath), /Initialization Sequence Completed/)
+test('reads the latest n2n log tail safely', () => {
+  const tempPath = path.join(os.tmpdir(), `wel-n2n-${Date.now()}.log`)
+  fs.writeFileSync(tempPath, 'first line\r\ncreated local tap device\r\n', 'utf8')
+  assert.match(readRecentLog(tempPath), /created local tap device/)
   fs.rmSync(tempPath, { force: true })
 })
 
-test('detects OpenVPN network configuration progress before final ready line', () => {
-  assert.match('PUSH_REPLY,route-gateway 10.222.1.1,ifconfig 10.222.1.10 255.255.255.0', OPENVPN_PROGRESS)
-  assert.match('tap-windows6 device [WEL TAP] opened', OPENVPN_PROGRESS)
-  assert.doesNotMatch('UDPv4 link remote: [AF_INET]8.133.189.9:12001', OPENVPN_PROGRESS)
+test('detects n2n network setup progress', () => {
+  assert.match('created local tap device', N2N_PROGRESS)
+  assert.match('successfully joined edge community', N2N_PROGRESS)
+  assert.match('supernode_connect completed', N2N_PROGRESS)
+  assert.doesNotMatch('UDPv4 link remote: [AF_INET]8.133.189.9:12001', N2N_PROGRESS)
 })
 
-test('retries transient OpenVPN and TAP startup failures only', () => {
+test('retries transient n2n and TAP startup failures only', () => {
   assert.equal(CONNECT_TIMEOUT_MS, 45000)
   assert.equal(CONNECT_MAX_ATTEMPTS, 4)
-  assert.equal(isRetryableConnectError(new Error('OpenVPN 连接失败：连接超时：未收到 OpenVPN 初始化完成信号')), true)
-  assert.equal(isRetryableConnectError(new Error('CreateFile failed on tap-windows6 device')), true)
-  assert.equal(isRetryableConnectError(new Error('Failed to open tap-windows6 adapter')), true)
-  assert.equal(isRetryableConnectError(new Error('OpenVPN 进程提前退出（代码 1）')), false)
+  assert.equal(isRetryableConnectError(new Error('n2n 连接失败：连接超时：未获取虚拟 IP')), true)
+  assert.equal(isRetryableConnectError(new Error('CreateFile failed on tap-windows device')), true)
+  assert.equal(isRetryableConnectError(new Error('Failed to open tap adapter')), true)
+  assert.equal(isRetryableConnectError(new Error('n2n 进程提前退出（代码 1）')), false)
 })
 
 test('parses and reuses Windows-assigned WEL network connection names', () => {
@@ -117,11 +120,10 @@ test('falls back to WMI TAP adapters when tapctl cannot list Win7 devices', () =
   ])
 })
 
-test('opens the remembered TAP adapter by GUID to avoid localized names', () => {
+test('opens the remembered TAP adapter without creating or deleting adapters', () => {
   const client = fs.readFileSync(path.join(__dirname, 'openvpn.cjs'), 'utf8')
-  assert.match(client, /`dev-node "\$\{tapNode\}"`/)
+  assert.match(client, /tapName: enabledAdapter\.name/)
   assert.match(client, /tapNode: enabledAdapter\.guid/)
-  assert.doesNotMatch(client, /tapNode: adapter\.name/)
   assert.doesNotMatch(client, /runTapctl\(tapctl, \['create'/)
   assert.doesNotMatch(client, /runTapctl\(tapctl, \['delete'/)
   assert.match(client, /ensureTapEnabled/)
@@ -132,8 +134,5 @@ test('opens the remembered TAP adapter by GUID to avoid localized names', () => 
   assert.match(client, /INSTALLER_TAP_STATE_PATH/)
   assert.match(client, /listTapAdaptersFromWmi/)
   assert.match(client, /ServiceName -eq 'tap0901'/)
-  assert.match(client, /stopStaleWelOpenVpnProcesses/)
-  assert.match(client, /await wait\(500\)/)
-  assert.doesNotMatch(client, /Set-ItemProperty -LiteralPath \$connectionKey -Name 'Name'/)
   assert.match(client, /await prepare\(\)/)
 })

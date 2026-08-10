@@ -39,12 +39,16 @@
         ]
       },
       {
-        "from": "resources/openvpn",
-        "to": "openvpn",
+        "from": "resources/n2n",
+        "to": "n2n",
         "filter": [
           "**/*",
           "!README.md"
         ]
+      },
+      {
+        "from": "resources/openvpn/bin/tapctl.exe",
+        "to": "n2n/tapctl.exe"
       }
     ],
     "win": {

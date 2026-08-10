@@ -10,7 +10,7 @@ const removeTap = fs.readFileSync(buildPath('remove-wel-tap.ps1'), 'utf8')
 const hideTapWindows = fs.readFileSync(buildPath('hide-tap-windows.ps1'), 'utf8')
 const cleanupOpenVpnGui = fs.readFileSync(buildPath('cleanup-openvpn-gui.ps1'), 'utf8')
 
-test('bundles the OpenVPN runtime and installs the Win7-compatible TAP helper', () => {
+test('bundles the n2n runtime and installs the Win7-compatible TAP helper', () => {
   assert.match(installer, /tap-windows-9\.21\.2\.exe/)
   assert.match(installer, /wel-tap-win7\.exe" \/S/)
   assert.match(installer, /remember-installed-tap\.ps1/)
@@ -26,7 +26,7 @@ test('bundles the OpenVPN runtime and installs the Win7-compatible TAP helper', 
   assert.match(installer, /File \/oname=remove-wel-openvpn-msi\.ps1/)
   assert.doesNotMatch(installer, /remove-wel-openvpn-msi\.ps1" -TapctlPath "\$INSTDIR\\resources\\openvpn\\bin\\tapctl\.exe"/)
   assert.doesNotMatch(installer, /Drivers\.Wintun|ADDLOCAL=[^\r\n]*OpenVPN,Drivers/)
-  assert.match(installer, /resources\\openvpn\\bin\\openvpn\.exe/)
+  assert.match(installer, /resources\\n2n\\edge\.exe/)
   assert.match(installer, /File \/oname=wel-tapctl\.exe/)
   assert.match(installer, /ensure-wel-tap\.ps1/)
   assert.match(installer, /remove-wel-tap\.ps1/)

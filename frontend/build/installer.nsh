@@ -9,10 +9,10 @@
   File /oname=hide-tap-windows.ps1 "${BUILD_RESOURCES_DIR}\hide-tap-windows.ps1"
   File /oname=wel-tap-win7.exe "${BUILD_RESOURCES_DIR}\tap-windows-9.21.2.exe"
 
-  ; OpenVPN runs directly from the application resources directory. Only the
+  ; n2n edge runs directly from the application resources directory. Only the
   ; signed TAP-Windows driver is installed into Windows.
-  IfFileExists "$INSTDIR\resources\openvpn\bin\openvpn.exe" 0 runtime_missing
-  IfFileExists "$INSTDIR\resources\openvpn\bin\tapctl.exe" runtime_ready
+  IfFileExists "$INSTDIR\resources\n2n\edge.exe" 0 runtime_missing
+  IfFileExists "$INSTDIR\resources\n2n\tapctl.exe" runtime_ready
 
 runtime_missing:
   MessageBox MB_ICONSTOP|MB_OK "WEL 联机运行文件不完整，请重新下载安装包。"
@@ -58,7 +58,7 @@ cleanup_gui_done:
   SetShellVarContext all
 
   DetailPrint "正在准备 WEL 虚拟网卡..."
-  nsExec::ExecToStack '"$SYSDIR\cmd.exe" /D /S /C ""$INSTDIR\resources\openvpn\bin\tapctl.exe" list"'
+  nsExec::ExecToStack '"$SYSDIR\cmd.exe" /D /S /C ""$INSTDIR\resources\n2n\tapctl.exe" list"'
   Pop $2
   Pop $3
   FileOpen $4 "$PLUGINSDIR\tap-before.txt" w
@@ -68,11 +68,11 @@ cleanup_gui_done:
 
 ensure_existing_tap:
   IfFileExists "$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe" 0 ensure_existing_tap_system32
-  nsExec::ExecToLog '"$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "$PLUGINSDIR\ensure-wel-tap.ps1" -TapctlPath "$INSTDIR\resources\openvpn\bin\tapctl.exe"'
+  nsExec::ExecToLog '"$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "$PLUGINSDIR\ensure-wel-tap.ps1" -TapctlPath "$INSTDIR\resources\n2n\tapctl.exe"'
   Pop $2
   Goto ensure_existing_tap_result
 ensure_existing_tap_system32:
-  nsExec::ExecToLog '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "$PLUGINSDIR\ensure-wel-tap.ps1" -TapctlPath "$INSTDIR\resources\openvpn\bin\tapctl.exe"'
+  nsExec::ExecToLog '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "$PLUGINSDIR\ensure-wel-tap.ps1" -TapctlPath "$INSTDIR\resources\n2n\tapctl.exe"'
   Pop $2
 ensure_existing_tap_result:
   StrCmp $2 "0" tap_ready
@@ -93,20 +93,20 @@ tap_driver_installed:
   ; The standalone TAP package creates its own adapter. Remember that adapter
   ; instead of relying on localized names such as "本地连接".
   IfFileExists "$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe" 0 remember_tap_system32
-  nsExec::ExecToLog '"$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "$PLUGINSDIR\remember-installed-tap.ps1" -TapctlPath "$INSTDIR\resources\openvpn\bin\tapctl.exe" -BeforeListPath "$PLUGINSDIR\tap-before.txt"'
+  nsExec::ExecToLog '"$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "$PLUGINSDIR\remember-installed-tap.ps1" -TapctlPath "$INSTDIR\resources\n2n\tapctl.exe" -BeforeListPath "$PLUGINSDIR\tap-before.txt"'
   Pop $2
   Goto remember_tap_result
 remember_tap_system32:
-  nsExec::ExecToLog '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "$PLUGINSDIR\remember-installed-tap.ps1" -TapctlPath "$INSTDIR\resources\openvpn\bin\tapctl.exe" -BeforeListPath "$PLUGINSDIR\tap-before.txt"'
+  nsExec::ExecToLog '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "$PLUGINSDIR\remember-installed-tap.ps1" -TapctlPath "$INSTDIR\resources\n2n\tapctl.exe" -BeforeListPath "$PLUGINSDIR\tap-before.txt"'
   Pop $2
 remember_tap_result:
   StrCmp $2 "0" tap_ready
   IfFileExists "$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe" 0 ensure_tap_after_install_system32
-  nsExec::ExecToLog '"$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "$PLUGINSDIR\ensure-wel-tap.ps1" -TapctlPath "$INSTDIR\resources\openvpn\bin\tapctl.exe"'
+  nsExec::ExecToLog '"$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "$PLUGINSDIR\ensure-wel-tap.ps1" -TapctlPath "$INSTDIR\resources\n2n\tapctl.exe"'
   Pop $2
   Goto ensure_tap_after_install_result
 ensure_tap_after_install_system32:
-  nsExec::ExecToLog '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "$PLUGINSDIR\ensure-wel-tap.ps1" -TapctlPath "$INSTDIR\resources\openvpn\bin\tapctl.exe"'
+  nsExec::ExecToLog '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "$PLUGINSDIR\ensure-wel-tap.ps1" -TapctlPath "$INSTDIR\resources\n2n\tapctl.exe"'
   Pop $2
 ensure_tap_after_install_result:
   StrCmp $2 "0" tap_ready

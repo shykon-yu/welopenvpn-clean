@@ -5,43 +5,37 @@ const { spawn } = require('node:child_process')
 const { inspectVpnNetwork, runPowerShell, waitForVpnNetwork } = require('./network.cjs')
 
 const DEFAULT_HOST = '8.133.189.9'
-const DEFAULT_PORT = 12001
+const DEFAULT_PORT = 25001
 const TAP_NAME = 'TAP-Windows Adapter V9'
 const WEL_TAP_NAME = /^(?:WEL Virtual LAN|WEL TAP|TAP-Windows Adapter V9|OpenVPN TAP-Windows6|以太网|本地连接)(?: \d+)?$/i
-const OPENVPN_READY = /Initialization Sequence Completed/i
-const OPENVPN_PROGRESS = /(?:PUSH_REPLY|open_tun|tap-windows6 device \[.+?\] opened|Successful ARP Flush)/i
+const N2N_PROGRESS = /(?:supernode|register|edge|tuntap|wintap|tap|peer|packet|created local tap|successfully joined)/i
 const CONNECT_TIMEOUT_MS = 45000
 const CONNECT_MAX_ATTEMPTS = 4
-const OPENVPN_DATA_CIPHERS = 'AES-256-GCM:AES-128-GCM:AES-256-CBC'
-const OPENVPN_FALLBACK_CIPHER = 'AES-256-CBC'
-const OPENVPN_REMOTE_CERT_EKU = 'TLS Web Server Authentication'
 const APP_DATA_DIRECTORY = path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local'), 'WELPlatform')
 const LOG_DIRECTORY = path.join(APP_DATA_DIRECTORY, 'logs')
 const TAP_STATE_PATH = path.join(APP_DATA_DIRECTORY, 'tap-adapter.json')
 const INSTALLER_TAP_STATE_PATH = path.join(process.env.PROGRAMDATA || 'C:\\ProgramData', 'WELPlatform', 'tap-create.txt')
-const MANAGEMENT_HOST = '127.0.0.1'
-const MANAGEMENT_STOP_TIMEOUT_MS = 3000
+const STOP_TIMEOUT_MS = 3000
 
 let connection = null
 
 function runtimeCandidates() {
   const resources = process.resourcesPath || ''
   return [
-    path.join(resources, 'openvpn', 'bin', 'openvpn.exe'),
-    path.join(resources, 'openvpn', 'openvpn.exe'),
-    'C:\\Program Files\\WEL\\OpenVPN\\bin\\openvpn.exe',
-    'C:\\Program Files\\OpenVPN\\bin\\openvpn.exe',
+    path.join(resources, 'n2n', 'edge.exe'),
+    path.join(__dirname, '..', 'resources', 'n2n', 'edge.exe'),
+    'C:\\Program Files\\WEL\\n2n\\edge.exe',
   ]
 }
 
-function locateOpenVpn() {
+function locateEdge() {
   return runtimeCandidates().find((candidate) => fs.existsSync(candidate)) || null
 }
 
 function tapctlCandidates() {
-  const openvpn = locateOpenVpn()
   return [
-    openvpn ? path.join(path.dirname(openvpn), 'tapctl.exe') : '',
+    path.join(process.resourcesPath || '', 'n2n', 'tapctl.exe'),
+    path.join(__dirname, '..', 'resources', 'n2n', 'tapctl.exe'),
     path.join(process.resourcesPath || '', 'openvpn', 'bin', 'tapctl.exe'),
     path.join(__dirname, '..', 'resources', 'openvpn', 'bin', 'tapctl.exe'),
   ].filter(Boolean)
@@ -274,55 +268,34 @@ function readRecentLog(filePath, limit = 2000) {
   }
 }
 
-function openVpnConfigPath(filePath) {
+function transportConfigPath(filePath) {
   return String(filePath || '').replace(/\\/g, '/')
 }
 
-function bundledCaPath() {
-  const candidates = [
-    path.join(process.resourcesPath || '', 'openvpn', 'ca.crt'),
-    path.join(__dirname, '..', 'resources', 'openvpn', 'ca.crt'),
-  ]
-  return candidates.find((candidate) => fs.existsSync(candidate)) || null
+function subnetMaskFromCidr(cidr) {
+  const prefix = Number(String(cidr || '').split('/')[1])
+  if (!Number.isInteger(prefix) || prefix < 0 || prefix > 32) return '255.255.255.0'
+  const mask = prefix === 0 ? 0 : (0xffffffff << (32 - prefix)) >>> 0
+  return [24, 16, 8, 0].map((shift) => (mask >>> shift) & 255).join('.')
 }
 
-function buildConfig({ host, port, username, token, roomID, subnetCidr, tapNode = TAP_NAME }) {
-  const caPath = bundledCaPath()
-  if (!caPath) throw new Error('联机证书未随客户端安装，请重新安装 WEL职业联盟对战平台')
+function buildConfig({ host, port, username, roomID, subnetCidr, virtualIP, community, transportKey, tapName }) {
   const runtime = ensureRuntimeDirectory()
   const prefix = `room-${safeFilePart(roomID)}-${safeFilePart(username)}`
-  const authPath = path.join(runtime, `${prefix}.auth`)
-  const configPath = path.join(runtime, `${prefix}.ovpn`)
-  const logPath = path.join(ensureLogDirectory(), `${prefix}.openvpn.log`)
-  const managementPort = 25000 + (Number(roomID) % 1000)
-  fs.writeFileSync(authPath, `${username}\r\n${token}\r\n`, { encoding: 'utf8', mode: 0o600 })
+  const configPath = path.join(runtime, `${prefix}.n2n.txt`)
+  const logPath = path.join(ensureLogDirectory(), `${prefix}.n2n.log`)
   fs.writeFileSync(logPath, '', { encoding: 'utf8' })
   const config = [
-    'client',
-    'dev-type tap',
-    `dev-node "${tapNode}"`,
-    'proto udp4',
-    'explicit-exit-notify 1',
-    `remote ${host} ${port}`,
-    `management ${MANAGEMENT_HOST} ${managementPort}`,
-    'nobind',
-    'persist-key',
-    'persist-tun',
-    'ip-win32 dynamic',
-    'auth-nocache',
-    `auth-user-pass "${openVpnConfigPath(authPath)}"`,
-    `ca "${openVpnConfigPath(caPath)}"`,
-    `remote-cert-eku "${OPENVPN_REMOTE_CERT_EKU}"`,
-    `data-ciphers ${OPENVPN_DATA_CIPHERS}`,
-    `data-ciphers-fallback ${OPENVPN_FALLBACK_CIPHER}`,
-    `cipher ${OPENVPN_FALLBACK_CIPHER}`,
-    'verb 3',
-    `log "${openVpnConfigPath(logPath)}"`,
-    `setenv WEL_ROOM_ID ${roomID}`,
-    `setenv WEL_SUBNET ${subnetCidr}`,
+    `community=${community}`,
+    `supernode=${host}:${port}`,
+    `virtual_ip=${virtualIP}`,
+    `netmask=${subnetMaskFromCidr(subnetCidr)}`,
+    `tap_name=${tapName || ''}`,
+    `identity=${username}`,
+    `room_id=${roomID}`,
   ].join('\r\n') + '\r\n'
   fs.writeFileSync(configPath, config, { encoding: 'utf8', mode: 0o600 })
-  return { authPath, configPath, logPath, managementPort }
+  return { configPath, logPath, community, transportKey }
 }
 
 function removeFiles(files) {
@@ -348,68 +321,31 @@ function waitForProcessExit(process, timeoutMs) {
   })
 }
 
-function sendManagementSignal(port, command) {
-  return new Promise((resolve, reject) => {
-    const net = require('node:net')
-    let sent = false
-    let settled = false
-    const finish = (error) => {
-      if (settled) return
-      settled = true
-      if (error) reject(error)
-      else resolve()
-    }
-    const socket = net.createConnection({ host: MANAGEMENT_HOST, port }, () => {
-      sent = true
-      socket.write(`${command}\n`)
-      socket.end()
-    })
-    socket.setTimeout(1500)
-    socket.once('timeout', () => {
-      socket.destroy()
-      finish(new Error('management timeout'))
-    })
-    socket.once('error', (error) => {
-      if (sent && ['ECONNRESET', 'EPIPE', 'ECONNABORTED'].includes(error.code)) finish()
-      else finish(error)
-    })
-    socket.once('close', () => finish())
-  })
-}
-
 async function stopConnection() {
   if (!connection) return
   const current = connection
   connection = null
   try {
-    if (current.managementPort) {
-      let exited = false
-      try {
-        await sendManagementSignal(current.managementPort, 'signal SIGTERM')
-        exited = await waitForProcessExit(current.process, MANAGEMENT_STOP_TIMEOUT_MS)
-      } catch {
-        exited = false
-      }
-      if (!exited) try { current.process.kill() } catch {}
-    } else {
-      try { current.process.kill() } catch {}
-    }
+    try { current.process.kill() } catch {}
+    const exited = await waitForProcessExit(current.process, STOP_TIMEOUT_MS)
+    if (!exited) try { current.process.kill('SIGKILL') } catch {}
   } finally {
     removeFiles(current.temporaryFiles)
   }
 }
 
 function status() {
-  const executable = locateOpenVpn()
-  const caPath = bundledCaPath()
-  const ready = Boolean(executable && caPath)
+  const executable = locateEdge()
+  const tapctl = locateTapctl()
+  const ready = Boolean(executable && tapctl)
   return {
     ready,
     openvpnInstalled: Boolean(executable),
+    n2nInstalled: Boolean(executable),
     tapName: TAP_NAME,
     message: ready
       ? '联机组件已准备好'
-      : '未检测到 WEL 联机组件，请重新运行完整安装包。',
+      : '未检测到 n2n 联机组件，请重新运行完整安装包。',
   }
 }
 
@@ -418,17 +354,20 @@ function wait(ms) {
 }
 
 function isRetryableConnectError(error) {
-  return /连接超时：未收到 OpenVPN 初始化完成信号|CreateFile failed on tap-windows6 device|Failed to open tap-windows6 adapter/i.test(String(error?.message || error || ''))
+  return /连接超时：未获取虚拟 IP|TAP|adapter|网卡|CreateFile|DeviceIoControl/i.test(String(error?.message || error || ''))
 }
 
-async function stopStaleWelOpenVpnProcesses() {
+async function stopStaleWelN2nProcesses() {
   if (process.platform !== 'win32') return
   try {
     await runPowerShell(`
 $deadline = [DateTime]::UtcNow.AddSeconds(5)
 do {
-  $processes = @(Get-WmiObject Win32_Process -Filter "Name = 'openvpn.exe'" |
-    Where-Object { $_.CommandLine -like '*WELPlatform*' })
+  $processes = @(Get-WmiObject Win32_Process -ErrorAction SilentlyContinue |
+    Where-Object {
+    ($_.Name -ieq 'edge.exe') -and
+      ($_.CommandLine -like '*wel-room-*' -or $_.CommandLine -like '*WELPlatform*')
+    })
   foreach ($process in $processes) { try { $process.Terminate() | Out-Null } catch {} }
   if ($processes.Count -eq 0) { exit 0 }
   Start-Sleep -Milliseconds 250
@@ -440,18 +379,53 @@ exit 2
   }
 }
 
-async function connectAttempt({ executable, host, port, roomID, username, token, subnetCidr, tapNode }) {
+function n2nCommunity(roomID, community) {
+  const value = String(community || '').trim()
+  return value || `wel-room-${roomID}`
+}
+
+function buildEdgeArgs({ host, port, roomID, username, subnetCidr, virtualIP, community, transportKey, tapName }) {
+  if (!virtualIP) throw new Error('n2n 房间虚拟 IP 未分配，请重新进入房间')
+  const args = [
+    '-c', n2nCommunity(roomID, community),
+    '-l', `${host}:${port}`,
+    '-a', virtualIP,
+    '-s', subnetMaskFromCidr(subnetCidr),
+  ]
+  if (tapName) args.unshift('-d', tapName)
+  if (transportKey) args.push('-k', transportKey)
+  if (username) args.push('-I', username)
+  return args
+}
+
+async function connectAttempt({ executable, host, port, roomID, username, subnetCidr, virtualIP, community, transportKey, tapName }) {
   await stopConnection()
   const files = buildConfig({
     host: host || DEFAULT_HOST,
     port: Number(port) || DEFAULT_PORT,
     username,
-    token,
     roomID,
     subnetCidr,
-    tapNode,
+    virtualIP,
+    community,
+    transportKey,
+    tapName,
   })
-  const child = spawn(executable, ['--config', files.configPath], { windowsHide: true })
+  const edgeArgs = buildEdgeArgs({
+    host: host || DEFAULT_HOST,
+    port: Number(port) || DEFAULT_PORT,
+    roomID,
+    username,
+    subnetCidr,
+    virtualIP,
+    community,
+    transportKey,
+    tapName,
+  })
+  const child = spawn(executable, edgeArgs, {
+    windowsHide: true,
+    env: { ...process.env, ...(transportKey ? { N2N_KEY: transportKey } : {}) },
+  })
   const output = []
   let failed = ''
   let initialized = false
@@ -459,25 +433,21 @@ async function connectAttempt({ executable, host, port, roomID, username, token,
   child.stderr.on('data', (chunk) => output.push(chunk.toString()))
   child.once('error', (error) => { failed = error.message })
   child.once('close', (code) => {
-    if (!initialized) failed = `OpenVPN 进程提前退出（代码 ${code ?? '未知'}）`
+    if (!initialized) failed = `n2n 进程提前退出（代码 ${code ?? '未知'}）`
   })
-  connection = { process: child, temporaryFiles: [files.authPath, files.configPath], logPath: files.logPath, managementPort: files.managementPort }
+  connection = { process: child, temporaryFiles: [files.configPath], logPath: files.logPath }
 
   try {
     const startedAt = Date.now()
     while (Date.now() - startedAt < CONNECT_TIMEOUT_MS) {
       if (failed) break
       const liveOutput = recentOutput(output)
-      const fileOutput = readRecentLog(files.logPath)
-      if (OPENVPN_READY.test(liveOutput) || OPENVPN_READY.test(fileOutput)) {
-        initialized = true
-        const network = await waitForVpnNetwork(subnetCidr, 8000)
-        if (!network.connected) throw new Error(`OpenVPN 已连接，但未获取 ${subnetCidr} 的虚拟 IP`)
-        return inspectVpnNetwork(subnetCidr)
+      if (liveOutput) {
+        try { fs.appendFileSync(files.logPath, liveOutput + '\r\n', 'utf8') } catch {}
       }
-      if (OPENVPN_PROGRESS.test(liveOutput) || OPENVPN_PROGRESS.test(fileOutput)) {
-        const network = await waitForVpnNetwork(subnetCidr, 8000)
-        if (network.connected) {
+      if (N2N_PROGRESS.test(liveOutput) || Date.now() - startedAt > 1000) {
+        const network = await waitForVpnNetwork(subnetCidr, 3000)
+        if (network.connected && (!virtualIP || network.actualIp === virtualIP)) {
           initialized = true
           return inspectVpnNetwork(subnetCidr)
         }
@@ -486,29 +456,31 @@ async function connectAttempt({ executable, host, port, roomID, username, token,
     }
     const liveOutput = recentOutput(output)
     const fileOutput = readRecentLog(files.logPath)
-    const reason = failed || '连接超时：未收到 OpenVPN 初始化完成信号'
+    const reason = failed || '连接超时：未获取虚拟 IP'
     const detail = [reason, liveOutput || fileOutput].filter(Boolean).join('\n')
-    throw new Error(`OpenVPN 连接失败：${detail || '连接超时'}\n日志文件：${files.logPath}`)
+    throw new Error(`n2n 连接失败：${detail || '连接超时'}\n日志文件：${files.logPath}`)
   } catch (error) {
     await stopConnection()
     throw error
   }
 }
 
-async function connect({ host, port, roomID, username, token, subnetCidr }) {
-  const executable = locateOpenVpn()
-  if (!executable) throw new Error('未检测到 OpenVPN 运行组件，请重新运行完整安装包')
-  if (!token || !username || !roomID || !subnetCidr) throw new Error('OpenVPN 房间凭据不完整')
+async function connect({ host, port, roomID, username, subnetCidr, virtualIP, community, transportKey }) {
+  const executable = locateEdge()
+  if (!executable) throw new Error('未检测到 n2n 联机组件 edge.exe，请重新运行完整安装包')
+  if (!username || !roomID || !subnetCidr) throw new Error('n2n 房间凭据不完整')
+  if (!virtualIP) throw new Error('n2n 房间虚拟 IP 未分配，请重新进入房间')
 
   await stopConnection()
-  await stopStaleWelOpenVpnProcesses()
+  await stopStaleWelN2nProcesses()
   await wait(500)
   const prepared = await prepare()
+  const tapName = prepared.tapName
 
   let lastError = null
   for (let attempt = 1; attempt <= CONNECT_MAX_ATTEMPTS; attempt += 1) {
     try {
-      return await connectAttempt({ executable, host, port, roomID, username, token, subnetCidr, tapNode: prepared.tapNode })
+      return await connectAttempt({ executable, host, port, roomID, username, subnetCidr, virtualIP, community, transportKey, tapName })
     } catch (error) {
       lastError = error
       if (attempt >= CONNECT_MAX_ATTEMPTS || !isRetryableConnectError(error)) throw error
@@ -523,15 +495,14 @@ module.exports = {
   DEFAULT_PORT,
   CONNECT_MAX_ATTEMPTS,
   CONNECT_TIMEOUT_MS,
-  OPENVPN_DATA_CIPHERS,
-  OPENVPN_FALLBACK_CIPHER,
-  OPENVPN_PROGRESS,
-  OPENVPN_REMOTE_CERT_EKU,
+  N2N_PROGRESS,
   TAP_NAME,
+  buildEdgeArgs,
   connect,
   isWelTapAdapter,
   isRetryableConnectError,
-  openVpnConfigPath,
+  n2nCommunity,
+  transportConfigPath,
   parseTapGuid,
   parseTapctlList,
   parseWmiTapAdapters,

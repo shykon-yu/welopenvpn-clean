@@ -11,6 +11,7 @@ type DesktopStatus = {
   ready: boolean
   message: string
   openvpnInstalled: boolean
+  n2nInstalled?: boolean
   tapName?: string
 }
 
@@ -236,15 +237,16 @@ async function restoreSession() {
 }
 
 function connectDesktopVpn(lease: Lease) {
-  const configuredBasePort = Number(import.meta.env.VITE_OPENVPN_BASE_PORT ?? 12000)
   const serverPort = Number(lease.server_port)
   return desktop()!.connectVpn({
     host: import.meta.env.VITE_OPENVPN_HOST ?? lease.server_host,
-    port: Number.isFinite(serverPort) && serverPort > 0 ? serverPort : configuredBasePort + lease.room_id,
+    port: Number.isFinite(serverPort) && serverPort > 0 ? serverPort : 25001,
     username: lease.username,
     roomID: lease.room_id,
     token: getAccessToken(),
     subnetCidr: lease.subnet_cidr,
+    virtualIP: lease.virtual_ip,
+    community: lease.community,
   })
 }
 
