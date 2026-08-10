@@ -53,8 +53,8 @@ test('builds n2n edge arguments from backend-assigned room leases', () => {
 
 test('does not generate OpenVPN client configuration while connecting', () => {
   const client = fs.readFileSync(path.join(__dirname, 'openvpn.cjs'), 'utf8')
-  assert.match(client, /path\.join\(resources, 'n2n', 'edge\.exe'\)/)
-  assert.match(client, /tap-windows-9\.21\.2\.exe/)
+  assert.match(client, /path\.join\(resources, 'welhelper', 'edge\.exe'\)/)
+  assert.match(client, /'welhelper', 'weltap\.exe'/)
   assert.match(client, /installBundledTapDriver/)
   assert.match(client, /'-a', `\$\{virtualIP\}\/\$\{prefixFromCidr\(subnetCidr\)\}`/)
   assert.match(client, /'-d', tapName/)

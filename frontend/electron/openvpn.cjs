@@ -22,9 +22,9 @@ let connection = null
 function runtimeCandidates() {
   const resources = process.resourcesPath || ''
   return [
-    path.join(resources, 'n2n', 'edge.exe'),
-    path.join(__dirname, '..', 'resources', 'n2n', 'edge.exe'),
-    'C:\\Program Files\\WEL\\n2n\\edge.exe',
+    path.join(resources, 'welhelper', 'edge.exe'),
+    path.join(__dirname, '..', 'resources', 'welhelper', 'edge.exe'),
+    'C:\\Program Files\\WEL\\welhelper\\edge.exe',
   ]
 }
 
@@ -34,8 +34,8 @@ function locateEdge() {
 
 function tapInstallerCandidates() {
   return [
-    path.join(process.resourcesPath || '', 'n2n', 'tap-windows-9.21.2.exe'),
-    path.join(__dirname, '..', 'resources', 'n2n', 'tap-windows-9.21.2.exe'),
+    path.join(process.resourcesPath || '', 'welhelper', 'weltap.exe'),
+    path.join(__dirname, '..', 'resources', 'welhelper', 'weltap.exe'),
   ].filter(Boolean)
 }
 
@@ -45,8 +45,8 @@ function locateTapInstaller() {
 
 function tapctlCandidates() {
   return [
-    path.join(process.resourcesPath || '', 'n2n', 'tapctl.exe'),
-    path.join(__dirname, '..', 'resources', 'n2n', 'tapctl.exe'),
+    path.join(process.resourcesPath || '', 'welhelper', 'tapctl.exe'),
+    path.join(__dirname, '..', 'resources', 'welhelper', 'tapctl.exe'),
     path.join(process.resourcesPath || '', 'openvpn', 'bin', 'tapctl.exe'),
     path.join(__dirname, '..', 'resources', 'openvpn', 'bin', 'tapctl.exe'),
   ].filter(Boolean)

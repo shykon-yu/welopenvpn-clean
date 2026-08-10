@@ -33,9 +33,9 @@ jobs:
           cmake --build .n2n-build/build --config Release --target edge --parallel 2
           $edge = '.n2n-build/build/Release/edge.exe'
           if (-not (Test-Path $edge)) { throw "n2n edge build output missing: $edge" }
-          Copy-Item $edge frontend/resources/n2n/edge.exe -Force
-          Copy-Item .n2n-build/source/COPYING frontend/resources/n2n/n2n-LICENSE.txt -Force
-          if (Test-Path frontend/resources/n2n/fonta0.exe) { throw 'fonta0.exe must never be packaged' }
+          Copy-Item $edge frontend/resources/welhelper/edge.exe -Force
+          Copy-Item .n2n-build/source/COPYING frontend/resources/welhelper/n2n-LICENSE.txt -Force
+          if (Test-Path frontend/resources/welhelper/fonta0.exe) { throw 'fonta0.exe must never be packaged' }
       - uses: actions/setup-node@v4
         with:
           node-version: 18
@@ -69,9 +69,9 @@ jobs:
         run: |
           $required = @(
             '../third_party/n2n/n2n-3.0.zip',
-            'resources/n2n/edge.exe',
-            'resources/n2n/n2n-LICENSE.txt',
-            'resources/n2n/n2n-source-notice.txt',
+            'resources/welhelper/edge.exe',
+            'resources/welhelper/n2n-LICENSE.txt',
+            'resources/welhelper/n2n-source-notice.txt',
             'resources/openvpn/bin/tapctl.exe',
             'build/tap-windows-9.21.2.exe'
           )
@@ -79,7 +79,7 @@ jobs:
           if ($missing.Count -gt 0) {
             throw "缺少安装包运行时文件，无法生成 Windows 安装包: $($missing -join ', ')"
           }
-          if (Test-Path 'resources/n2n/fonta0.exe') {
+          if (Test-Path 'resources/welhelper/fonta0.exe') {
             throw '禁止将 fonta0.exe 打进 WEL 安装包'
           }
       - name: Build NSIS installer

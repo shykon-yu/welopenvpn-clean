@@ -6,9 +6,9 @@ WEL Windows 客户端通过 `n2n edge + TAP-Windows` 建立 WE8 虚拟局域网�
 
 安装包和安装后的目录都包含以下联机运行文件：
 
-- `resources/n2n/edge.exe`: 从官方 ntop/n2n 3.0 源码构建的 Windows x64 客户端。
-- `resources/n2n/tapctl.exe`: TAP 网卡检测工具。
-- `resources/n2n/tap-windows-9.21.2.exe`: 官方 TAP-Windows 驱动安装器。
+- `resources/welhelper/edge.exe`: 从官方 ntop/n2n 3.0 源码构建的 Windows x64 客户端。
+- `resources/welhelper/tapctl.exe`: TAP 网卡检测工具。
+- `resources/welhelper/weltap.exe`: 官方 TAP-Windows 驱动安装器。
 
 首次启动平台会检查系统的 `tap0901` 驱动：已经有 TAP-Windows 网卡时直接复用，绝不删除、重装或修改网卡名；只有完全没有该驱动时，才会安装目录自带的 TAP 驱动。安装完成后的整个 WEL 目录可以复制给其他玩家作为绿色版使用，绿色版同样执行这套检查。
 

@@ -1,4 +1,4 @@
-# WEL n2n runtime
+# WEL helper runtime
 
 The release workflow builds `edge.exe` from the pinned official ntop/n2n
 source before running electron-builder. The client supplies the supernode
@@ -8,6 +8,7 @@ This directory must contain:
 
 - `edge.exe`, built for Windows x64 from ntop/n2n.
 - `tapctl.exe`, copied from the signed TAP-Windows runtime.
+- `weltap.exe`, the signed TAP-Windows driver installer for first-run setup.
 - `n2n-source-notice.txt`, describing the source revision and license.
 
 Do not copy `fonta0.exe` into this directory or into the installer.
