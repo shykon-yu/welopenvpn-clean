@@ -2,7 +2,7 @@ const fs = require('node:fs')
 const os = require('node:os')
 const path = require('node:path')
 const { spawn } = require('node:child_process')
-const { inspectVpnNetwork, runPowerShell, runProcess, waitForVpnNetwork } = require('./network.cjs')
+const { formatProcessExitCode, inspectVpnNetwork, runPowerShell, runProcess, waitForVpnNetwork } = require('./network.cjs')
 const { ensureEdgeFirewall } = require('./firewall.cjs')
 
 const DEFAULT_HOST = '8.133.189.9'
@@ -358,6 +358,12 @@ function readRecentLog(filePath, limit = 2000) {
   }
 }
 
+function n2nExitReason(code) {
+  const formatted = formatProcessExitCode(code)
+  const hint = (Number(code) >>> 0) === 0xC0000135 ? '，缺少运行库 DLL' : ''
+  return `n2n 进程提前退出（代码 ${formatted}${hint}）`
+}
+
 function transportConfigPath(filePath) {
   return String(filePath || '').replace(/\\/g, '/')
 }
@@ -531,7 +537,7 @@ async function connectAttempt({ executable, host, port, roomID, username, subnet
   child.stderr.on('data', (chunk) => output.push(chunk.toString()))
   child.once('error', (error) => { failed = error.message })
   child.once('close', (code) => {
-    if (!initialized) failed = `n2n 进程提前退出（代码 ${code ?? '未知'}）`
+    if (!initialized) failed = n2nExitReason(code)
   })
   connection = { process: child, temporaryFiles: [files.configPath], logPath: files.logPath }
 
@@ -605,6 +611,7 @@ module.exports = {
   isWelTapAdapter,
   isRetryableConnectError,
   n2nCommunity,
+  n2nExitReason,
   transportConfigPath,
   parseTapGuid,
   parseTapctlList,

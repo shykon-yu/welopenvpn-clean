@@ -12,6 +12,7 @@ const {
   isWelTapAdapter,
   isRetryableConnectError,
   n2nCommunity,
+  n2nExitReason,
   parseTapGuid,
   parseTapctlList,
   parseRegistryTapAdapters,
@@ -89,6 +90,13 @@ test('retries transient n2n and TAP startup failures only', () => {
   assert.equal(isRetryableConnectError(new Error('CreateFile failed on tap-windows device')), true)
   assert.equal(isRetryableConnectError(new Error('Failed to open tap adapter')), true)
   assert.equal(isRetryableConnectError(new Error('n2n 进程提前退出（代码 1）')), false)
+})
+
+test('explains the Windows missing DLL process status', () => {
+  assert.equal(
+    n2nExitReason(3221225781),
+    'n2n 进程提前退出（代码 -1073741515 (0xC0000135)，缺少运行库 DLL）',
+  )
 })
 
 test('parses and reuses Windows-assigned WEL network connection names', () => {

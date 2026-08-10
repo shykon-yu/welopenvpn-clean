@@ -29,10 +29,24 @@ jobs:
           Move-Item ".n2n-build/n2n-$env:N2N_VERSION" .n2n-build/source
           cmake -S .n2n-build/source -B .n2n-build/build `
             -DN2N_OPTION_USE_PTHREAD=OFF `
+            -DCMAKE_POLICY_DEFAULT_CMP0091=NEW `
+            -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded `
             -DCMAKE_POLICY_VERSION_MINIMUM=3.5
           cmake --build .n2n-build/build --config Release --target edge --parallel 2
           $edge = '.n2n-build/build/Release/edge.exe'
           if (-not (Test-Path $edge)) { throw "n2n edge build output missing: $edge" }
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $visualStudio = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          $dumpbin = Get-ChildItem "$visualStudio\VC\Tools\MSVC" -Filter dumpbin.exe -Recurse |
+            Where-Object { $_.FullName -match 'Hostx64\\x64\\dumpbin\.exe$' } |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1
+          if (-not $dumpbin) { throw 'dumpbin.exe not found; cannot verify edge runtime dependencies' }
+          $dependencies = (& $dumpbin.FullName /dependents $edge | Out-String)
+          Write-Host $dependencies
+          if ($dependencies -match '(?i)VCRUNTIME\d*\.dll|MSVCP\d*\.dll|UCRTBASE\.dll|api-ms-win-crt') {
+            throw 'edge.exe still depends on a dynamic Visual C++ runtime; green editions would fail with 0xC0000135'
+          }
           Copy-Item $edge frontend/resources/welhelper/edge.exe -Force
           Copy-Item .n2n-build/source/COPYING frontend/resources/welhelper/n2n-LICENSE.txt -Force
           if (Test-Path frontend/resources/welhelper/fonta0.exe) { throw 'fonta0.exe must never be packaged' }
