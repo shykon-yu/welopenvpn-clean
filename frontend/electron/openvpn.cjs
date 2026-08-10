@@ -324,16 +324,6 @@ function prefixFromCidr(cidr) {
   return prefix
 }
 
-function macFromVirtualIP(virtualIP) {
-  const octets = String(virtualIP || '').split('.').map(Number)
-  if (octets.length !== 4 || octets.some((value) => !Number.isInteger(value) || value < 0 || value > 255)) {
-    throw new Error('n2n 房间虚拟 IP 格式不正确')
-  }
-  return [0x02, 0x57, ...octets]
-    .map((value) => value.toString(16).padStart(2, '0').toUpperCase())
-    .join(':')
-}
-
 function buildConfig({ host, port, username, roomID, subnetCidr, virtualIP, community, transportKey, tapName }) {
   const runtime = ensureRuntimeDirectory()
   const prefix = `room-${safeFilePart(roomID)}-${safeFilePart(username)}`
@@ -408,6 +398,25 @@ function wait(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
+async function ensureEdgeFirewall(executable) {
+  if (process.platform !== 'win32') return
+  const ruleName = 'WEL n2n edge inbound'
+  const escapedExecutable = String(executable || '').replace(/'/g, "''")
+  try {
+    await runPowerShell(`
+$identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+$principal = New-Object Security.Principal.WindowsPrincipal($identity)
+if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { exit 3 }
+$ruleName = '${ruleName}'
+& netsh.exe advfirewall firewall delete rule name=$ruleName | Out-Null
+& netsh.exe advfirewall firewall add rule name=$ruleName dir=in action=allow enable=yes profile=any protocol=UDP program='${escapedExecutable}' | Out-Null
+if ($LASTEXITCODE -ne 0) { exit 4 }
+`, 8000)
+  } catch {
+    // Non-elevated clients keep the normal Windows firewall confirmation flow.
+  }
+}
+
 function isRetryableConnectError(error) {
   return /连接超时：未获取虚拟 IP|TAP|adapter|网卡|CreateFile|DeviceIoControl/i.test(String(error?.message || error || ''))
 }
@@ -446,9 +455,7 @@ function buildEdgeArgs({ host, port, roomID, username, subnetCidr, virtualIP, co
     '-c', n2nCommunity(roomID, community),
     '-l', `${host}:${port}`,
     '-a', `${virtualIP}/${prefixFromCidr(subnetCidr)}`,
-    '-m', macFromVirtualIP(virtualIP),
     '-t', '5645',
-    '-x', '1',
   ]
   if (tapName) args.unshift('-d', tapName)
   if (transportKey) args.push('-k', transportKey)
@@ -533,12 +540,13 @@ async function connect({ host, port, roomID, username, subnetCidr, virtualIP, co
   await stopStaleWelN2nProcesses()
   await wait(500)
   const prepared = await prepare()
-  const tapName = prepared.tapName
+  const tapNode = prepared.tapNode
+  await ensureEdgeFirewall(executable)
 
   let lastError = null
   for (let attempt = 1; attempt <= CONNECT_MAX_ATTEMPTS; attempt += 1) {
     try {
-      return await connectAttempt({ executable, host, port, roomID, username, subnetCidr, virtualIP, community, transportKey, tapName })
+      return await connectAttempt({ executable, host, port, roomID, username, subnetCidr, virtualIP, community, transportKey, tapName: tapNode })
     } catch (error) {
       lastError = error
       if (attempt >= CONNECT_MAX_ATTEMPTS || !isRetryableConnectError(error)) throw error
@@ -559,7 +567,6 @@ module.exports = {
   connect,
   isWelTapAdapter,
   isRetryableConnectError,
-  macFromVirtualIP,
   n2nCommunity,
   transportConfigPath,
   parseTapGuid,

@@ -11,7 +11,6 @@ const {
   buildEdgeArgs,
   isWelTapAdapter,
   isRetryableConnectError,
-  macFromVirtualIP,
   n2nCommunity,
   parseTapGuid,
   parseTapctlList,
@@ -40,24 +39,16 @@ test('builds n2n edge arguments from backend-assigned room leases', () => {
     subnetCidr: '10.222.1.0/24',
     virtualIP: '10.222.1.10',
     community: 'wel-10.222.1.0-24',
-    tapName: '以太网 2',
+    tapName: '{11111111-2222-3333-4444-555555555555}',
   }), [
-    '-d', '以太网 2',
+    '-d', '{11111111-2222-3333-4444-555555555555}',
     '-E',
     '-c', 'wel-10.222.1.0-24',
     '-l', 'game.example.test:22222',
     '-a', '10.222.1.10/24',
-    '-m', '02:57:0A:DE:01:0A',
     '-t', '5645',
-    '-x', '1',
     '-I', 'room-1-user-5',
   ])
-})
-
-test('uses a stable locally administered MAC for each virtual IP', () => {
-  assert.equal(macFromVirtualIP('10.222.1.10'), '02:57:0A:DE:01:0A')
-  assert.equal(macFromVirtualIP('10.222.1.11'), '02:57:0A:DE:01:0B')
-  assert.throws(() => macFromVirtualIP('10.222.1.999'), /格式不正确/)
 })
 
 test('does not generate OpenVPN client configuration while connecting', () => {
@@ -67,6 +58,7 @@ test('does not generate OpenVPN client configuration while connecting', () => {
   assert.match(client, /installBundledTapDriver/)
   assert.match(client, /'-a', `\$\{virtualIP\}\/\$\{prefixFromCidr\(subnetCidr\)\}`/)
   assert.match(client, /'-d', tapName/)
+  assert.match(client, /ensureEdgeFirewall\(executable\)/)
   assert.match(client, /stopStaleWelN2nProcesses/)
   assert.doesNotMatch(client, /'ip-win32 dynamic'/)
   assert.doesNotMatch(client, /'dev-type tap'/)
