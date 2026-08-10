@@ -97,7 +97,7 @@ test('parses and reuses Windows-assigned WEL network connection names', () => {
   ].join('\r\n'))
   assert.deepEqual(adapters, [
     { guid: '{11111111-2222-3333-4444-555555555555}', name: '以太网' },
-    { guid: '{aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee}', name: '本地连接 17' },
+    { guid: '{AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE}', name: '本地连接 17' },
   ])
   assert.equal(isWelTapAdapter('以太网'), true)
   assert.equal(isWelTapAdapter('本地连接 17'), true)
@@ -123,7 +123,7 @@ test('parses and reuses Windows-assigned WEL network connection names', () => {
 test('accepts a tapctl adapter when its display name is absent', () => {
   const guid = '{FFFFFFFF-FFFF-FFFF-FFFF-FFFFFFFFFFFF}'
   assert.deepEqual(parseTapctlList(guid), [
-    { guid: guid.toLowerCase(), name: 'TAP-Windows Adapter V9' },
+    { guid, name: 'TAP-Windows Adapter V9' },
   ])
 })
 
@@ -135,8 +135,24 @@ test('falls back to WMI TAP adapters when tapctl cannot list Win7 devices', () =
   ].join('\r\n'))
   assert.deepEqual(adapters, [
     { guid: '{11111111-2222-3333-4444-555555555555}', name: '本地连接' },
-    { guid: '{aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee}', name: 'TAP-Windows Adapter V9' },
+    { guid: '{AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE}', name: 'TAP-Windows Adapter V9' },
   ])
+})
+
+test('preserves the Windows TAP GUID casing passed to n2n', () => {
+  const guid = '{ABCDEF12-3456-7890-ABCD-EF1234567890}'
+  const adapter = selectWelTapAdapter(parseTapctlList(`${guid} Ethernet 7`))
+  assert.equal(adapter.guid, guid)
+  assert.equal(buildEdgeArgs({
+    host: 'game.example.test',
+    port: 22222,
+    roomID: 1,
+    username: 'room-1-user-5',
+    subnetCidr: '10.222.1.0/24',
+    virtualIP: '10.222.1.10',
+    community: 'wel-10.222.1.0-24',
+    tapName: adapter.guid,
+  })[1], guid)
 })
 
 test('opens the remembered TAP adapter without creating or deleting adapters', () => {

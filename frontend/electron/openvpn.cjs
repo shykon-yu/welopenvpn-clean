@@ -70,7 +70,9 @@ function parseTapctlList(output) {
       // tapctl enumerates TAP devices. The GUID is authoritative; a missing
       // or localized connection name must not make an existing device look
       // absent and trigger another driver installation.
-      return { guid: `{${match[1]}}`.toLowerCase(), name: name || TAP_NAME }
+      // Keep the registry's original casing because n2n 3.0 compares the
+      // Windows adapter ID with strcmp() when opening the device.
+      return { guid: `{${match[1]}}`, name: name || TAP_NAME }
     })
     .filter(Boolean)
 }
@@ -94,9 +96,9 @@ function parseWmiTapAdapters(output) {
       const guid = decodeBase64Field(fields[0]).trim()
       const name = decodeBase64Field(fields[1]).trim() || decodeBase64Field(fields[2]).trim()
       if (!guid) return null
-      const normalizedGuid = parseTapGuid(`{${guid.replace(/[{}]/g, '')}}`)
-      if (!normalizedGuid) return null
-      return { guid: normalizedGuid, name: name || TAP_NAME }
+      const exactGuid = extractTapGuid(`{${guid.replace(/[{}]/g, '')}}`)
+      if (!exactGuid) return null
+      return { guid: exactGuid, name: name || TAP_NAME }
     })
     .filter(Boolean)
 }
@@ -106,9 +108,13 @@ function isWelTapAdapter(name) {
   return WEL_TAP_NAME.test(normalized)
 }
 
-function parseTapGuid(output) {
+function extractTapGuid(output) {
   const match = String(output || '').match(/\{([0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})\}/i)
-  return match ? `{${match[1]}}`.toLowerCase() : null
+  return match ? `{${match[1]}}` : null
+}
+
+function parseTapGuid(output) {
+  return extractTapGuid(output)?.toLowerCase() || null
 }
 
 function readRememberedTapGuid() {
