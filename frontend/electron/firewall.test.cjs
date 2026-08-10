@@ -32,14 +32,15 @@ test('rejects an empty WE8 path', () => {
 })
 
 test('scopes unrestricted UDP rules to the active TAP interface', () => {
-  const script = buildTapUdpFirewallScript('以太网 2')
-  assert.match(script, /\$interfaceName = '以太网 2'/)
+  const script = buildTapUdpFirewallScript('10.222.1.0/24')
+  assert.match(script, /\$addressScope = '10\.222\.1\.0\/255\.255\.255\.0,255\.255\.255\.255'/)
   assert.match(script, /\$rule\.Protocol = 17/)
-  assert.match(script, /\$rule\.Interfaces = \[string\[\]\]@\(\$interfaceName\)/)
+  assert.match(script, /\$rule\.LocalAddresses = \$addressScope/)
+  assert.match(script, /\$rule\.RemoteAddresses = \$addressScope/)
   assert.match(script, new RegExp(TAP_UDP_IN_RULE))
   assert.match(script, new RegExp(TAP_UDP_OUT_RULE))
 })
 
-test('rejects an empty TAP interface name', () => {
-  assert.throws(() => buildTapUdpFirewallScript(''), /TAP 网卡接口名为空/)
+test('rejects an invalid WEL subnet', () => {
+  assert.throws(() => buildTapUdpFirewallScript(''), /WEL 网段地址无效/)
 })

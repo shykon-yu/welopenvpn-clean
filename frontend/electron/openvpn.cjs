@@ -552,7 +552,7 @@ async function connect({ host, port, roomID, username, subnetCidr, virtualIP, co
   await stopStaleWelN2nProcesses()
   await wait(500)
   const prepared = await prepare()
-  await ensureTapUdpFirewall(prepared.tapName)
+  await ensureTapUdpFirewall(subnetCidr)
   const tapNode = prepared.tapNode
   await ensureEdgeFirewall(executable)
 

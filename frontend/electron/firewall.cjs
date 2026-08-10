@@ -17,13 +17,36 @@ function escapePowerShellSingleQuoted(value) {
   return String(value || '').replace(/'/g, "''")
 }
 
-function buildTapUdpFirewallScript(interfaceName) {
-  const normalizedName = String(interfaceName || '').trim()
-  if (!normalizedName) throw new Error('TAP 网卡接口名为空')
+function ipv4ToNumber(value) {
+  const parts = String(value || '').split('.').map(Number)
+  if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) return null
+  return parts.reduce((result, part) => ((result << 8) | part) >>> 0, 0)
+}
+
+function subnetMaskFromCidr(cidr) {
+  const prefix = Number(String(cidr || '').split('/')[1])
+  if (!Number.isInteger(prefix) || prefix < 0 || prefix > 32) return null
+  const mask = prefix === 0 ? 0 : (0xffffffff << (32 - prefix)) >>> 0
+  return [24, 16, 8, 0].map((shift) => (mask >>> shift) & 255).join('.')
+}
+
+function firewallAddressScope(cidr) {
+  const [network] = String(cidr || '').trim().split('/')
+  const mask = subnetMaskFromCidr(cidr)
+  const networkNumber = ipv4ToNumber(network)
+  const maskNumber = ipv4ToNumber(mask)
+  if (networkNumber === null || maskNumber === null) throw new Error('WEL 网段地址无效')
+  const normalizedNetwork = (networkNumber & maskNumber) >>> 0
+  const address = [24, 16, 8, 0].map((shift) => (normalizedNetwork >>> shift) & 255).join('.')
+  return `${address}/${mask},255.255.255.255`
+}
+
+function buildTapUdpFirewallScript(subnetCidr) {
+  const addressScope = firewallAddressScope(subnetCidr)
 
   return `
 $ErrorActionPreference = 'Stop'
-$interfaceName = '${escapePowerShellSingleQuoted(normalizedName)}'
+$addressScope = '${escapePowerShellSingleQuoted(addressScope)}'
 $policy = New-Object -ComObject HNetCfg.FwPolicy2
 foreach ($ruleName in @('${TAP_UDP_IN_RULE}', '${TAP_UDP_OUT_RULE}', 'WEL TAP UDP Inbound', 'WEL TAP UDP Outbound')) {
   try { $policy.Rules.Remove($ruleName) } catch {}
@@ -39,7 +62,8 @@ function Add-WelTapUdpRule([string]$name, [int]$direction) {
   $rule.Enabled = $true
   $rule.Profiles = 2147483647
   $rule.InterfaceTypes = 'All'
-  $rule.Interfaces = [string[]]@($interfaceName)
+  $rule.LocalAddresses = $addressScope
+  $rule.RemoteAddresses = $addressScope
   $policy.Rules.Add($rule)
 }
 
@@ -48,9 +72,9 @@ Add-WelTapUdpRule '${TAP_UDP_OUT_RULE}' 2
 `
 }
 
-async function ensureTapUdpFirewall(interfaceName) {
+async function ensureTapUdpFirewall(subnetCidr) {
   if (process.platform !== 'win32') return false
-  await runPowerShell(buildTapUdpFirewallScript(interfaceName), 12000)
+  await runPowerShell(buildTapUdpFirewallScript(subnetCidr), 12000)
   return true
 }
 
