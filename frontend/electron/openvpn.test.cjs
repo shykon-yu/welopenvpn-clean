@@ -60,7 +60,6 @@ test('does not generate OpenVPN client configuration while connecting', () => {
   assert.match(client, /'-a', `\$\{virtualIP\}\/\$\{prefixFromCidr\(subnetCidr\)\}`/)
   assert.match(client, /'-d', tapName/)
   assert.match(client, /ensureEdgeFirewall\(executable\)/)
-  assert.match(client, /protocol=icmpv4:8,any remoteip=10\.222\.0\.0\/16/)
   assert.match(client, /stopStaleWelN2nProcesses/)
   assert.doesNotMatch(client, /'ip-win32 dynamic'/)
   assert.doesNotMatch(client, /'dev-type tap'/)

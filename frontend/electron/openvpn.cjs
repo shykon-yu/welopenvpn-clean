@@ -3,7 +3,7 @@ const os = require('node:os')
 const path = require('node:path')
 const { spawn } = require('node:child_process')
 const { inspectVpnNetwork, runPowerShell, waitForVpnNetwork } = require('./network.cjs')
-const { ensureTapUdpFirewall } = require('./firewall.cjs')
+const { ensureEdgeFirewall } = require('./firewall.cjs')
 
 const DEFAULT_HOST = '8.133.189.9'
 const DEFAULT_PORT = 22222
@@ -404,30 +404,6 @@ function wait(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
-async function ensureEdgeFirewall(executable) {
-  if (process.platform !== 'win32') return
-  const ruleName = 'WEL n2n edge inbound'
-  const pingRuleName = 'WEL Virtual LAN ICMPv4'
-  const escapedExecutable = String(executable || '').replace(/'/g, "''")
-  try {
-    await runPowerShell(`
-$identity = [Security.Principal.WindowsIdentity]::GetCurrent()
-$principal = New-Object Security.Principal.WindowsPrincipal($identity)
-if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { exit 3 }
-$ruleName = '${ruleName}'
-$pingRuleName = '${pingRuleName}'
-& netsh.exe advfirewall firewall delete rule name=$ruleName | Out-Null
-& netsh.exe advfirewall firewall add rule name=$ruleName dir=in action=allow enable=yes profile=any protocol=UDP program='${escapedExecutable}' | Out-Null
-if ($LASTEXITCODE -ne 0) { exit 4 }
-& netsh.exe advfirewall firewall delete rule name=$pingRuleName | Out-Null
-& netsh.exe advfirewall firewall add rule name=$pingRuleName dir=in action=allow enable=yes profile=any protocol=icmpv4:8,any remoteip=10.222.0.0/16 | Out-Null
-if ($LASTEXITCODE -ne 0) { exit 5 }
-`, 8000)
-  } catch {
-    // Non-elevated clients keep the normal Windows firewall confirmation flow.
-  }
-}
-
 function isRetryableConnectError(error) {
   return /连接超时：未获取虚拟 IP|TAP|adapter|网卡|CreateFile|DeviceIoControl/i.test(String(error?.message || error || ''))
 }
@@ -552,9 +528,12 @@ async function connect({ host, port, roomID, username, subnetCidr, virtualIP, co
   await stopStaleWelN2nProcesses()
   await wait(500)
   const prepared = await prepare()
-  await ensureTapUdpFirewall(subnetCidr)
   const tapNode = prepared.tapNode
-  await ensureEdgeFirewall(executable)
+  try {
+    await ensureEdgeFirewall(executable)
+  } catch {
+    // Non-elevated clients keep the normal Windows firewall confirmation flow.
+  }
 
   let lastError = null
   for (let attempt = 1; attempt <= CONNECT_MAX_ATTEMPTS; attempt += 1) {
