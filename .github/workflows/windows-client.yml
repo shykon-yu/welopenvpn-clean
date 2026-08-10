@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 env:
-  N2N_VERSION: 3.0
+  N2N_VERSION: "3.0"
   N2N_PORT: 22222
 
 jobs:
@@ -27,9 +27,9 @@ jobs:
           Remove-Item .n2n-build -Recurse -Force -ErrorAction SilentlyContinue
           Expand-Archive -LiteralPath $archive -DestinationPath .n2n-build
           Move-Item ".n2n-build/n2n-$env:N2N_VERSION" .n2n-build/source
-          cmake -S .n2n-build/source -B .n2n-build/build -A x64 `
+          cmake -S .n2n-build/source -B .n2n-build/build `
             -DN2N_OPTION_USE_PTHREAD=OFF `
-            -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
+            -DCMAKE_POLICY_VERSION_MINIMUM=3.5
           cmake --build .n2n-build/build --config Release --target edge --parallel 2
           $edge = '.n2n-build/build/Release/edge.exe'
           if (-not (Test-Path $edge)) { throw "n2n edge build output missing: $edge" }
