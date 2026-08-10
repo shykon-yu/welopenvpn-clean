@@ -97,7 +97,7 @@ test('parses and reuses Windows-assigned WEL network connection names', () => {
   ].join('\r\n'))
   assert.deepEqual(adapters, [
     { guid: '{11111111-2222-3333-4444-555555555555}', name: '以太网' },
-    { guid: '{AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE}', name: '本地连接 17' },
+    { guid: '{aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee}', name: '本地连接 17' },
   ])
   assert.equal(isWelTapAdapter('以太网'), true)
   assert.equal(isWelTapAdapter('本地连接 17'), true)
@@ -114,7 +114,17 @@ test('parses and reuses Windows-assigned WEL network connection names', () => {
   assert.equal(selectWelTapAdapter([
     { guid: '{DDDDDDDD-DDDD-DDDD-DDDD-DDDDDDDDDDDD}', name: 'TAP-Windows Adapter V9 #3' },
   ]).name, 'TAP-Windows Adapter V9 #3')
+  assert.equal(selectWelTapAdapter([
+    { guid: '{EEEEEEEE-EEEE-EEEE-EEEE-EEEEEEEEEEEE}', name: 'Ethernet 7' },
+  ]).name, 'Ethernet 7')
   assert.equal(parseTapGuid('Adapter {CCCCCCCC-CCCC-CCCC-CCCC-CCCCCCCCCCCC} created'), '{cccccccc-cccc-cccc-cccc-cccccccccccc}')
+})
+
+test('accepts a tapctl adapter when its display name is absent', () => {
+  const guid = '{FFFFFFFF-FFFF-FFFF-FFFF-FFFFFFFFFFFF}'
+  assert.deepEqual(parseTapctlList(guid), [
+    { guid: guid.toLowerCase(), name: 'TAP-Windows Adapter V9' },
+  ])
 })
 
 test('falls back to WMI TAP adapters when tapctl cannot list Win7 devices', () => {
@@ -147,11 +157,13 @@ test('opens the remembered TAP adapter without creating or deleting adapters', (
   assert.match(client, /await prepare\(\)/)
 })
 
-test('green editions install TAP only when no tap0901 adapter exists', () => {
+test('green editions install TAP only when no enumerated TAP adapter exists', () => {
   const client = fs.readFileSync(path.join(__dirname, 'openvpn.cjs'), 'utf8')
   assert.match(client, /let adapters = await listTapAdapters\(tapctl\)/)
   assert.match(client, /if \(adapter\) \{\s*return \{ \.\.\.current, adapterReady: true/)
   assert.match(client, /const installer = locateTapInstaller\(\)/)
   assert.match(client, /await installBundledTapDriver\(installer\)/)
+  assert.match(client, /find\(\(\{ guid \}\) => Boolean\(parseTapGuid\(guid\)\)\)/)
+  assert.doesNotMatch(client, /const owned = adapters\.filter\(\(\{ name \}\)/)
   assert.doesNotMatch(client, /runTapctl\(tapctl, \['delete'/)
 })

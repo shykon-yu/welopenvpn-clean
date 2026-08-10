@@ -67,7 +67,10 @@ function parseTapctlList(output) {
         .slice((match.index || 0) + match[0].length)
         .trim()
         .replace(/^['"]|['"]$/g, '')
-      return name ? { guid: `{${match[1]}}`, name } : null
+      // tapctl enumerates TAP devices. The GUID is authoritative; a missing
+      // or localized connection name must not make an existing device look
+      // absent and trigger another driver installation.
+      return { guid: `{${match[1]}}`.toLowerCase(), name: name || TAP_NAME }
     })
     .filter(Boolean)
 }
@@ -136,17 +139,7 @@ async function ensureTapReady(adapter) {
 }
 
 function selectWelTapAdapter(adapters) {
-  const owned = adapters.filter(({ name }) => isWelTapAdapter(name))
-  return owned.find(({ name }) => name.toLowerCase() === TAP_NAME.toLowerCase())
-    || owned.find(({ name }) => name.toLowerCase() === 'wel tap')
-    || owned.find(({ name }) => /^以太网(?: \d+)?$/i.test(name))
-    || owned.find(({ name }) => /^本地连接(?: \d+)?$/i.test(name))
-    || owned.sort((left, right) => {
-      const leftNumber = Number(left.name.match(/(\d+)$/)?.[1] || 0)
-      const rightNumber = Number(right.name.match(/(\d+)$/)?.[1] || 0)
-      return rightNumber - leftNumber
-    })[0]
-    || null
+  return (adapters || []).find(({ guid }) => Boolean(parseTapGuid(guid))) || null
 }
 
 function runTapctl(executable, args, timeoutMs = 10000) {
