@@ -3,6 +3,7 @@ const os = require('node:os')
 const path = require('node:path')
 const { spawn } = require('node:child_process')
 const { inspectVpnNetwork, runPowerShell, waitForVpnNetwork } = require('./network.cjs')
+const { ensureTapUdpFirewall } = require('./firewall.cjs')
 
 const DEFAULT_HOST = '8.133.189.9'
 const DEFAULT_PORT = 22222
@@ -551,6 +552,7 @@ async function connect({ host, port, roomID, username, subnetCidr, virtualIP, co
   await stopStaleWelN2nProcesses()
   await wait(500)
   const prepared = await prepare()
+  await ensureTapUdpFirewall(prepared.tapName)
   const tapNode = prepared.tapNode
   await ensureEdgeFirewall(executable)
 
