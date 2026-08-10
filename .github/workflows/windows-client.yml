@@ -10,6 +10,7 @@ permissions:
 
 env:
   N2N_VERSION: 3.0
+  N2N_PORT: 22222
 
 jobs:
   build:
@@ -19,16 +20,17 @@ jobs:
         working-directory: frontend
     steps:
       - uses: actions/checkout@v4
-      - name: Download official n2n source archive
+      - name: Extract bundled official n2n source archive
         shell: pwsh
         working-directory: .
         run: |
           $ErrorActionPreference = 'Stop'
           Remove-Item '.n2n-build' -Recurse -Force -ErrorAction SilentlyContinue
           New-Item -ItemType Directory -Path '.n2n-build' -Force | Out-Null
-          $archivePath = Join-Path '.n2n-build' 'n2n.zip'
-          $sourceUrl = "https://codeload.github.com/ntop/n2n/zip/refs/tags/$env:N2N_VERSION"
-          Invoke-WebRequest -Uri $sourceUrl -OutFile $archivePath
+          $archivePath = Join-Path 'third_party/n2n' "n2n-$env:N2N_VERSION.zip"
+          if (-not (Test-Path $archivePath)) {
+            throw "缺少内置 n2n 源码包：$archivePath"
+          }
           Expand-Archive -Path $archivePath -DestinationPath '.n2n-build'
           $sourceDirectory = Get-ChildItem '.n2n-build' -Directory |
             Where-Object { $_.Name -like 'n2n-*' -and $_.Name -ne 'source' } |
@@ -103,6 +105,7 @@ jobs:
         shell: pwsh
         run: |
           $required = @(
+            '../third_party/n2n/n2n-3.0.zip',
             'resources/n2n/edge.exe',
             'resources/n2n/n2n-LICENSE.txt',
             'resources/n2n/n2n-source-notice.txt',

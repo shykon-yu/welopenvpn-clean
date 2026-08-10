@@ -28,12 +28,12 @@ test('uses n2n-safe paths in generated runtime values', () => {
 })
 
 test('builds n2n edge arguments from backend-assigned room leases', () => {
-  assert.equal(DEFAULT_PORT, 25001)
+  assert.equal(DEFAULT_PORT, 22222)
   assert.equal(n2nCommunity(1, ''), 'wel-room-1')
   assert.equal(n2nCommunity(1, 'wel-10.222.1.0-24'), 'wel-10.222.1.0-24')
   assert.deepEqual(buildEdgeArgs({
     host: 'game.example.test',
-    port: 25001,
+    port: 22222,
     roomID: 1,
     username: 'room-1-user-5',
     subnetCidr: '10.222.1.0/24',
@@ -44,7 +44,7 @@ test('builds n2n edge arguments from backend-assigned room leases', () => {
     '-d', '以太网 2',
     '-E',
     '-c', 'wel-10.222.1.0-24',
-    '-l', 'game.example.test:25001',
+    '-l', 'game.example.test:22222',
     '-a', '10.222.1.10',
     '-s', '255.255.255.0',
     '-x', '1',

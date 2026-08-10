@@ -5,7 +5,7 @@ const { spawn } = require('node:child_process')
 const { inspectVpnNetwork, runPowerShell, waitForVpnNetwork } = require('./network.cjs')
 
 const DEFAULT_HOST = '8.133.189.9'
-const DEFAULT_PORT = 25001
+const DEFAULT_PORT = 22222
 const TAP_NAME = 'TAP-Windows Adapter V9'
 const WEL_TAP_NAME = /^(?:WEL Virtual LAN|WEL TAP|TAP-Windows Adapter V9|OpenVPN TAP-Windows6|以太网|本地连接)(?: \d+)?$/i
 const N2N_PROGRESS = /(?:supernode|register|edge|tuntap|wintap|tap|peer|packet|created local tap|successfully joined)/i

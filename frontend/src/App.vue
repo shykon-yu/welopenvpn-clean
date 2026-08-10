@@ -240,7 +240,7 @@ function connectDesktopVpn(lease: Lease) {
   const serverPort = Number(lease.server_port)
   return desktop()!.connectVpn({
     host: import.meta.env.VITE_OPENVPN_HOST ?? lease.server_host,
-    port: Number.isFinite(serverPort) && serverPort > 0 ? serverPort : 25001,
+    port: Number.isFinite(serverPort) && serverPort > 0 ? serverPort : 22222,
     username: lease.username,
     roomID: lease.room_id,
     token: getAccessToken(),
