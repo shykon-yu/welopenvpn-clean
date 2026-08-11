@@ -2,6 +2,8 @@ const test = require('node:test')
 const assert = require('node:assert/strict')
 const {
   buildEdgeFirewallScript,
+  buildGameDiscoveryFirewallScript,
+  GAME_DISCOVERY_INBOUND_RULE,
   buildWe8FirewallScript,
   LEGACY_WE8_RULES,
   EDGE_INBOUND_RULE,
@@ -24,6 +26,16 @@ test('allows all inbound traffic for the bundled n2n edge executable', () => {
   assert.match(script, new RegExp(EDGE_INBOUND_RULE))
   assert.match(script, /\$rule\.Protocol = 256/)
   assert.match(script, /\$rule\.Direction = 1/)
+})
+
+test('allows game discovery only from the active WEL virtual subnet', () => {
+  const script = buildGameDiscoveryFirewallScript('10.222.1.0/24')
+  assert.match(script, new RegExp(GAME_DISCOVERY_INBOUND_RULE))
+  assert.match(script, /\$rule\.Protocol = 17/)
+  assert.match(script, /\$rule\.LocalPorts = '5739'/)
+  assert.match(script, /\$rule\.RemoteAddresses = '10\.222\.1\.0\/24'/)
+  assert.match(script, /\$rule\.Direction = 1/)
+  assert.throws(() => buildGameDiscoveryFirewallScript('not-a-subnet'), /房间子网格式不正确/)
 })
 
 test('rejects an empty firewall program path', () => {

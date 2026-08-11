@@ -3,7 +3,7 @@ const os = require('node:os')
 const path = require('node:path')
 const { spawn } = require('node:child_process')
 const { formatProcessExitCode, inspectVpnNetwork, runPowerShell, runProcess, waitForVpnNetwork } = require('./network.cjs')
-const { ensureEdgeFirewall } = require('./firewall.cjs')
+const { ensureEdgeFirewall, ensureGameDiscoveryFirewall } = require('./firewall.cjs')
 
 const DEFAULT_HOST = '8.133.189.9'
 const DEFAULT_PORT = 22222
@@ -581,7 +581,6 @@ function buildEdgeArgs({ host, port, roomID, username, subnetCidr, virtualIP, co
   if (!virtualIP) throw new Error('n2n 房间虚拟 IP 未分配，请重新进入房间')
   const args = [
     '-E',
-    '-S1',
     '-x', '1',
     '-c', n2nCommunity(roomID, community),
     '-l', `${host}:${port}`,
@@ -680,6 +679,11 @@ async function connect({ host, port, roomID, username, subnetCidr, virtualIP, co
     await ensureEdgeFirewall(executable)
   } catch {
     // Non-elevated clients keep the normal Windows firewall confirmation flow.
+  }
+  try {
+    await ensureGameDiscoveryFirewall(subnetCidr)
+  } catch {
+    // The n2n connection remains usable if a restricted Windows policy blocks rule creation.
   }
 
   let lastError = null

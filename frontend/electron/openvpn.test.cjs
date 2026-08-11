@@ -47,7 +47,6 @@ test('builds n2n edge arguments from backend-assigned room leases', () => {
   }), [
     '-d', '{11111111-2222-3333-4444-555555555555}',
     '-E',
-    '-S1',
     '-x', '1',
     '-c', 'wel-10.222.1.0-24',
     '-l', 'game.example.test:22222',
@@ -70,6 +69,8 @@ test('does not generate OpenVPN client configuration while connecting', () => {
   assert.match(client, /'-e', transportBindIP/)
   assert.match(client, /'-d', tapName/)
   assert.match(client, /ensureEdgeFirewall\(executable\)/)
+  assert.match(client, /ensureGameDiscoveryFirewall\(subnetCidr\)/)
+  assert.doesNotMatch(client, /'-S1'/)
   assert.match(client, /stopStaleWelN2nProcesses/)
   assert.doesNotMatch(client, /'ip-win32 dynamic'/)
   assert.doesNotMatch(client, /'dev-type tap'/)
