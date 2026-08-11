@@ -70,6 +70,8 @@ test('does not generate OpenVPN client configuration while connecting', () => {
   assert.match(client, /'-d', tapName/)
   assert.match(client, /ensureEdgeFirewall\(executable\)/)
   assert.match(client, /ensureRoomUdpFirewall\(subnetCidr\)/)
+  assert.match(client, /ensureBroadcastRoute\(inspectedNetwork\)/)
+  assert.match(client, /removeBroadcastRoute\(current\.broadcastRoute\)/)
   assert.doesNotMatch(client, /'-S1'/)
   assert.match(client, /stopStaleWelN2nProcesses/)
   assert.doesNotMatch(client, /'ip-win32 dynamic'/)

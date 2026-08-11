@@ -4,6 +4,7 @@ const path = require('node:path')
 const { spawn } = require('node:child_process')
 const { formatProcessExitCode, inspectVpnNetwork, runPowerShell, runProcess, waitForVpnNetwork } = require('./network.cjs')
 const { ensureEdgeFirewall, ensureRoomUdpFirewall } = require('./firewall.cjs')
+const { ensureBroadcastRoute, removeBroadcastRoute } = require('./broadcast-route.cjs')
 
 const DEFAULT_HOST = '8.133.189.9'
 const DEFAULT_PORT = 22222
@@ -467,6 +468,7 @@ async function stopConnection() {
     const exited = await waitForProcessExit(current.process, STOP_TIMEOUT_MS)
     if (!exited) try { current.process.kill('SIGKILL') } catch {}
   } finally {
+    try { await removeBroadcastRoute(current.broadcastRoute) } catch {}
     removeFiles(current.temporaryFiles)
   }
 }
@@ -632,8 +634,14 @@ async function connectAttempt({ executable, host, port, roomID, username, subnet
   child.once('error', (error) => { failed = error.message })
   child.once('close', (code) => {
     if (!initialized) failed = n2nExitReason(code)
+    else if (connection?.process === child) {
+      const current = connection
+      connection = null
+      removeBroadcastRoute(current.broadcastRoute).catch(() => {})
+      removeFiles(current.temporaryFiles)
+    }
   })
-  connection = { process: child, temporaryFiles: [files.configPath], logPath: files.logPath }
+  connection = { process: child, temporaryFiles: [files.configPath], logPath: files.logPath, broadcastRoute: null }
 
   try {
     const startedAt = Date.now()
@@ -646,8 +654,15 @@ async function connectAttempt({ executable, host, port, roomID, username, subnet
       if (N2N_PROGRESS.test(liveOutput) || Date.now() - startedAt > 1000) {
         const network = await waitForVpnNetwork(subnetCidr, 3000)
         if (network.connected && (!virtualIP || network.actualIp === virtualIP)) {
+          const inspectedNetwork = await inspectVpnNetwork(subnetCidr)
+          const broadcastRoute = await ensureBroadcastRoute(inspectedNetwork)
+          if (failed || child.exitCode !== null) {
+            await removeBroadcastRoute(broadcastRoute)
+            throw new Error(failed || 'n2n 进程在配置游戏广播路由时退出')
+          }
+          connection.broadcastRoute = broadcastRoute
           initialized = true
-          return inspectVpnNetwork(subnetCidr)
+          return inspectedNetwork
         }
       }
       await wait(300)
