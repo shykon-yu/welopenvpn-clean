@@ -19,7 +19,9 @@ test('binds the limited broadcast route to the active WEL TAP interface', () => 
 
 test('removes only the exact WEL TAP broadcast route', () => {
   const script = buildBroadcastRouteScript('10.222.1.10', 8, 'remove')
-  assert.match(script, /DELETE \$destination MASK \$mask \$nextHop IF \$interfaceIndex/)
+  assert.match(script, /\$existingRoutes = @\(Get-WmiObject Win32_IP4RouteTable/)
+  assert.match(script, /DELETE \$destination MASK \$mask \$existingNextHop IF \$interfaceIndex/)
+  assert.match(script, /\$ErrorActionPreference = 'SilentlyContinue'/)
   assert.doesNotMatch(script, /ADD \$destination/)
 })
 

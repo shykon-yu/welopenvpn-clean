@@ -19,8 +19,12 @@ function buildBroadcastRouteScript(virtualIP, interfaceIndex, action = 'add') {
   if (!['add', 'remove'].includes(action)) throw new Error('WEL 广播路由操作不正确')
   const addRoute = action === 'add'
     ? `
-& $routeExe ADD $destination MASK $mask $nextHop METRIC 1 IF $interfaceIndex | Out-Null
-if ($LASTEXITCODE -ne 0) { throw '无法把游戏广播路由绑定到 WEL TAP 网卡' }
+$previousErrorActionPreference = $ErrorActionPreference
+$ErrorActionPreference = 'SilentlyContinue'
+& $routeExe ADD $destination MASK $mask $nextHop METRIC 1 IF $interfaceIndex 2>&1 | Out-Null
+$routeExitCode = $LASTEXITCODE
+$ErrorActionPreference = $previousErrorActionPreference
+if ($routeExitCode -ne 0) { throw '无法把游戏广播路由绑定到 WEL TAP 网卡' }
 
 Start-Sleep -Milliseconds 200
 $installed = @(Get-WmiObject Win32_IP4RouteTable -ErrorAction Stop |
@@ -41,8 +45,22 @@ $nextHop = '${target.virtualIP}'
 $interfaceIndex = ${target.interfaceIndex}
 $routeExe = Join-Path $env:SystemRoot 'System32\\route.exe'
 
-# Only remove the exact route owned by the current WEL TAP adapter.
-& $routeExe DELETE $destination MASK $mask $nextHop IF $interfaceIndex 2>$null | Out-Null
+# A missing route is normal on the first connection. Enumerate first so
+# route.exe never turns "Element not found" into a terminating PS error.
+$existingRoutes = @(Get-WmiObject Win32_IP4RouteTable -ErrorAction SilentlyContinue |
+  Where-Object {
+    $_.Destination -eq $destination -and
+    $_.Mask -eq $mask -and
+    [int]$_.InterfaceIndex -eq $interfaceIndex
+  })
+foreach ($existingRoute in $existingRoutes) {
+  $existingNextHop = [string]$existingRoute.NextHop
+  if (-not $existingNextHop) { continue }
+  $previousErrorActionPreference = $ErrorActionPreference
+  $ErrorActionPreference = 'SilentlyContinue'
+  & $routeExe DELETE $destination MASK $mask $existingNextHop IF $interfaceIndex 2>&1 | Out-Null
+  $ErrorActionPreference = $previousErrorActionPreference
+}
 ${addRoute}`
 }
 
