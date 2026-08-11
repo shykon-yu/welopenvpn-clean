@@ -44,9 +44,12 @@ function locateGameRuntime() {
 
 function normalizeNetwork(network) {
   const tapIP = String(network?.actualIp || '').trim()
-  const interfaceIndex = Number(network?.interfaceIndex)
+  const reportedInterfaceIndex = Number(network?.interfaceIndex)
+  const interfaceIndex = Number.isInteger(reportedInterfaceIndex) && reportedInterfaceIndex > 0
+    ? reportedInterfaceIndex
+    : 0
   const subnetCidr = String(network?.subnetCidr || '').trim()
-  if (ipv4ToNumber(tapIP) === null || !Number.isInteger(interfaceIndex) || interfaceIndex <= 0) {
+  if (ipv4ToNumber(tapIP) === null) {
     throw new Error('当前房间的 TAP 网卡信息不完整，请重新进入房间')
   }
   return { tapIP, interfaceIndex, subnetCidr, broadcastIP: broadcastAddressFromCidr(subnetCidr) }

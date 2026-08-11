@@ -20,7 +20,20 @@ test('builds socket-binding settings from the active TAP network', () => {
     subnetCidr: '10.222.1.0/24',
     broadcastIP: '10.222.1.255',
   })
-  assert.throws(() => normalizeNetwork({ actualIp: '192.0.2.1' }), /TAP/)
+  assert.deepEqual(normalizeNetwork({
+    actualIp: '10.222.1.10',
+    interfaceIndex: null,
+    subnetCidr: '10.222.1.0/24',
+  }), {
+    tapIP: '10.222.1.10',
+    interfaceIndex: 0,
+    subnetCidr: '10.222.1.0/24',
+    broadcastIP: '10.222.1.255',
+  })
+  assert.throws(() => normalizeNetwork({
+    actualIp: 'not-an-ip',
+    subnetCidr: '10.222.1.0/24',
+  }), /TAP/)
 })
 
 test('locates the paired 32-bit launcher and hook runtime', () => {

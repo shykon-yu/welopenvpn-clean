@@ -52,7 +52,7 @@ static int read_interface_environment(DWORD *interface_index) {
 
     if (length == 0 || length >= sizeof(value)) return 0;
     parsed = strtoul(value, &end, 10);
-    if (end == value || *end != '\0' || parsed == 0) return 0;
+    if (end == value || *end != '\0') return 0;
     *interface_index = (DWORD)parsed;
     return 1;
 }
