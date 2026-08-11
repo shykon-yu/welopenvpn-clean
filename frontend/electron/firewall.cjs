@@ -4,6 +4,8 @@ const EDGE_INBOUND_RULE = 'WEL n2n edge inbound'
 const WE8_INBOUND_RULE = 'WEL WE8 inbound'
 const ROOM_UDP_INBOUND_RULE = 'WEL room UDP inbound'
 const ROOM_UDP_OUTBOUND_RULE = 'WEL room UDP outbound'
+const ROOM_ICMP_INBOUND_RULE = 'WEL room ICMPv4 inbound'
+const ROOM_ICMP_OUTBOUND_RULE = 'WEL room ICMPv4 outbound'
 const LEGACY_GAME_DISCOVERY_RULE = 'WEL game discovery UDP 5739 inbound'
 const LEGACY_WE8_RULES = [
   'WEL WE8 UDP 5739 Inbound',
@@ -98,21 +100,25 @@ $policy = New-Object -ComObject HNetCfg.FwPolicy2
 $ruleNames = @(
   '${LEGACY_GAME_DISCOVERY_RULE}',
   '${ROOM_UDP_INBOUND_RULE}',
-  '${ROOM_UDP_OUTBOUND_RULE}'
+  '${ROOM_UDP_OUTBOUND_RULE}',
+  '${ROOM_ICMP_INBOUND_RULE}',
+  '${ROOM_ICMP_OUTBOUND_RULE}'
 )
 foreach ($ruleName in $ruleNames) {
   try { $policy.Rules.Remove($ruleName) } catch {}
 }
 
 $ruleDefinitions = @(
-  @{ Name = '${ROOM_UDP_INBOUND_RULE}'; Direction = 1; Description = 'Allow inbound UDP traffic from the active WEL virtual room subnet.' },
-  @{ Name = '${ROOM_UDP_OUTBOUND_RULE}'; Direction = 2; Description = 'Allow outbound UDP traffic to the active WEL virtual room subnet.' }
+  @{ Name = '${ROOM_UDP_INBOUND_RULE}'; Protocol = 17; Direction = 1; Description = 'Allow inbound UDP traffic from the active WEL virtual room subnet.' },
+  @{ Name = '${ROOM_UDP_OUTBOUND_RULE}'; Protocol = 17; Direction = 2; Description = 'Allow outbound UDP traffic to the active WEL virtual room subnet.' },
+  @{ Name = '${ROOM_ICMP_INBOUND_RULE}'; Protocol = 1; Direction = 1; Description = 'Allow inbound ICMPv4 traffic from the active WEL virtual room subnet.' },
+  @{ Name = '${ROOM_ICMP_OUTBOUND_RULE}'; Protocol = 1; Direction = 2; Description = 'Allow outbound ICMPv4 traffic to the active WEL virtual room subnet.' }
 )
 foreach ($definition in $ruleDefinitions) {
   $rule = New-Object -ComObject HNetCfg.FWRule
   $rule.Name = $definition.Name
   $rule.Description = $definition.Description
-  $rule.Protocol = 17
+  $rule.Protocol = $definition.Protocol
   $rule.RemoteAddresses = '${escapePowerShellSingleQuoted(subnet)}'
   $rule.Direction = $definition.Direction
   $rule.Action = 1
@@ -148,6 +154,8 @@ module.exports = {
   LEGACY_GAME_DISCOVERY_RULE,
   ROOM_UDP_INBOUND_RULE,
   ROOM_UDP_OUTBOUND_RULE,
+  ROOM_ICMP_INBOUND_RULE,
+  ROOM_ICMP_OUTBOUND_RULE,
   WE8_INBOUND_RULE,
   buildEdgeFirewallScript,
   buildRoomUdpFirewallScript,
