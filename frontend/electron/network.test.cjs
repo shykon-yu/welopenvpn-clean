@@ -1,6 +1,10 @@
 const test = require('node:test')
 const assert = require('node:assert/strict')
-const { analyzeNetwork, findNetstatLines, findRoomAddress, formatProcessExitCode, isIPv4InCIDR, parseAdapterOutput, parseTasklistPids } = require('./network.cjs')
+const { analyzeNetwork, findNetstatLines, findRoomAddress, formatProcessExitCode, isIPv4InCIDR, parseAdapterOutput, parseTasklistPids, runElevatedPowerShell } = require('./network.cjs')
+
+test('uses a hidden elevated PowerShell process for Windows firewall fallback', () => {
+  assert.equal(typeof runElevatedPowerShell, 'function')
+})
 
 test('formats unsigned Windows crash exit codes as signed hexadecimal values', () => {
   assert.equal(formatProcessExitCode(4294967295), '-1 (0xFFFFFFFF)')

@@ -111,11 +111,15 @@ async function runElevatedPowerShell(script, timeoutMs = 30000) {
   const launcher = `
 $ErrorActionPreference = 'Stop'
 $powershell = Join-Path $env:SystemRoot 'System32\\WindowsPowerShell\\v1.0\\powershell.exe'
-$arguments = '-NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand ${encoded}'
-$process = Start-Process -FilePath $powershell -ArgumentList $arguments -Verb RunAs -Wait -PassThru
+$arguments = @('-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', '${encoded}')
+$process = Start-Process -FilePath $powershell -ArgumentList $arguments -Verb RunAs -WindowStyle Hidden -Wait -PassThru
 exit $process.ExitCode
 `
-  await runPowerShell(launcher, timeoutMs)
+  try {
+    await runPowerShell(launcher, timeoutMs)
+  } catch (error) {
+    throw new Error(`Windows 提权防火墙脚本失败：${error.message}`)
+  }
 }
 
 function runProcess(file, args, timeoutMs = 5000) {
