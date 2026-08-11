@@ -5,7 +5,6 @@ const path = require('node:path')
 const { pathToFileURL } = require('node:url')
 const { version: appVersion } = require('../package.json')
 const { decodeProcessOutput, inspectVpnNetwork } = require('./network.cjs')
-const { ensureWe8Firewall, isWindows7 } = require('./firewall.cjs')
 const { launchGameBound } = require('./game-launch.cjs')
 const openvpn = require('./openvpn.cjs')
 
@@ -168,7 +167,7 @@ ipcMain.handle('prepare-openvpn', async () => {
   }
 })
 ipcMain.handle('connect-openvpn', async (event, credentials) => {
-  if (isWindows7()) {
+  const requestFirewallAccess = async () => {
     const result = await dialog.showMessageBox(BrowserWindow.fromWebContents(event.sender), {
       type: 'warning',
       title: '需要 Windows 防火墙授权',
@@ -181,7 +180,7 @@ ipcMain.handle('connect-openvpn', async (event, credentials) => {
     })
     if (result.response !== 0) throw new Error('已取消 Windows 防火墙授权，无法进入房间')
   }
-  return openvpn.connect(credentials)
+  return openvpn.connect({ ...credentials, requestFirewallAccess })
 })
 ipcMain.handle('disconnect-openvpn', () => openvpn.stopConnection())
 ipcMain.handle('inspect-openvpn', (_event, { subnetCidr }) => inspectVpnNetwork(subnetCidr))
@@ -194,13 +193,6 @@ ipcMain.handle('launch-game', async (_event, gamePath) => {
   const executable = resolveGameExecutable(gamePath)
   const network = openvpn.activeNetwork()
   if (!network?.connected) throw new Error('请先进入房间并等待 WEL TAP 网卡连接完成')
-  if (!isWindows7()) {
-    try {
-      await ensureWe8Firewall(executable)
-    } catch (error) {
-      writeLog('配置 WE8 防火墙规则失败', error)
-    }
-  }
   const result = await launchGameBound(executable, network)
   writeLog(`WE8 已通过 TAP Socket 绑定启动：${result}`)
 })

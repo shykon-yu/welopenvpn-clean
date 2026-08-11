@@ -19,6 +19,8 @@ const {
   firewallHelperCandidates,
   firewallHelperExitReason,
   isWindows7,
+  NATIVE_ROOM_FIREWALL_RULES,
+  roomFirewallRulesPresent,
 } = require('./firewall.cjs')
 
 test('allows all inbound traffic for the selected WE8 executable', () => {
@@ -51,7 +53,8 @@ test('allows room UDP and ICMPv4 traffic in both directions on the active WEL vi
   assert.match(script, /\$rule\.Protocol = \$definition\.Protocol/)
   assert.match(script, /Direction = 1/)
   assert.match(script, /Direction = 2/)
-  assert.match(script, /\$rule\.RemoteAddresses = '10\.222\.1\.0\/255\.255\.255\.0'/)
+  assert.match(script, /\$rule\.LocalAddresses = '10\.222\.1\.0\/255\.255\.255\.0'/)
+  assert.match(script, /\$rule\.RemoteAddresses = '\*'/)
   assert.doesNotMatch(script, /LocalPorts|RemotePorts|ApplicationName/)
   assert.throws(() => buildRoomUdpFirewallScript('not-a-subnet'), /房间子网格式不正确/)
   assert.throws(() => buildRoomUdpFirewallScript('10.222.999.0/24'), /房间子网格式不正确/)
@@ -66,26 +69,39 @@ test('rejects an empty firewall program path', () => {
   assert.throws(() => buildWe8FirewallScript(''), /防火墙程序路径为空/)
 })
 
-test('uses a dedicated native firewall authorization helper on Windows 7', () => {
+test('uses a dedicated native firewall authorization helper on every supported Windows version', () => {
   assert.equal(isWindows7('6.1.7601'), true)
   assert.equal(isWindows7('10.0.19045'), false)
   assert.ok(firewallHelperCandidates().some((candidate) => candidate.endsWith('welfirewall.exe')))
   assert.match(firewallHelperExitReason(10), /用户取消/)
   assert.match(firewallHelperExitReason(12), /规则写入失败/)
+  assert.deepEqual(NATIVE_ROOM_FIREWALL_RULES, [
+    EDGE_INBOUND_RULE,
+    'WEL n2n edge outbound',
+    'WEL room IP inbound',
+    'WEL room IP outbound',
+  ])
+  assert.equal(typeof roomFirewallRulesPresent, 'function')
 })
 
-test('uses ShellExecute UAC and netsh inside the native Windows 7 helper', () => {
+test('uses ShellExecute UAC and netsh inside the native Windows firewall helper', () => {
   const source = fs.readFileSync(path.join(__dirname, '..', '..', 'native', 'wel-firewall', 'wel_firewall.c'), 'utf8')
   assert.match(source, /ShellExecuteExW/)
   assert.match(source, /lpVerb = L"runas"/)
   assert.match(source, /netsh\.exe/)
+  assert.match(source, /WEL n2n edge outbound/)
+  assert.match(source, /protocol=any localip=.*remoteip=any/)
   assert.match(source, /icmpv4:any,any/)
   assert.match(source, /WEL room UDP inbound/)
 })
 
 test('verifies that Windows actually retained every required firewall rule', () => {
-  const script = buildFirewallRuleCheckScript([ROOM_UDP_INBOUND_RULE, ROOM_ICMP_INBOUND_RULE])
+  const script = buildFirewallRuleCheckScript([ROOM_UDP_INBOUND_RULE, ROOM_ICMP_INBOUND_RULE], {
+    localAddress: '10.222.1.0/255.255.255.0',
+  })
   assert.match(script, /HNetCfg\.FwPolicy2/)
   assert.match(script, /\$rule\.Enabled/)
   assert.match(script, /\$rule\.Action -eq 1/)
+  assert.match(script, /\$expectedLocalAddress/)
+  assert.match(script, /\$rule\.LocalAddresses/)
 })

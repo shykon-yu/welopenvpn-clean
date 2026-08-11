@@ -80,7 +80,10 @@ static int add_room_rules(const wel_firewall_options *options) {
         L"WEL room UDP outbound",
         L"WEL room ICMPv4 inbound",
         L"WEL room ICMPv4 outbound",
-        L"WEL n2n edge inbound"
+        L"WEL room IP inbound",
+        L"WEL room IP outbound",
+        L"WEL n2n edge inbound",
+        L"WEL n2n edge outbound"
     };
     size_t index;
 
@@ -96,22 +99,37 @@ static int add_room_rules(const wel_firewall_options *options) {
     if (!run_netsh(command)) return 0;
 
     _snwprintf_s(command, ARRAYSIZE(command), _TRUNCATE,
-        L"advfirewall firewall add rule name=\"WEL room UDP inbound\" dir=in action=allow protocol=udp remoteip=%ls enable=yes profile=any",
+        L"advfirewall firewall add rule name=\"WEL n2n edge outbound\" dir=out action=allow program=\"%ls\" enable=yes profile=any",
+        options->edge_path);
+    if (!run_netsh(command)) return 0;
+
+    _snwprintf_s(command, ARRAYSIZE(command), _TRUNCATE,
+        L"advfirewall firewall add rule name=\"WEL room IP inbound\" dir=in action=allow protocol=any localip=%ls remoteip=any enable=yes profile=any",
         options->subnet);
     if (!run_netsh(command)) return 0;
 
     _snwprintf_s(command, ARRAYSIZE(command), _TRUNCATE,
-        L"advfirewall firewall add rule name=\"WEL room UDP outbound\" dir=out action=allow protocol=udp remoteip=%ls enable=yes profile=any",
+        L"advfirewall firewall add rule name=\"WEL room IP outbound\" dir=out action=allow protocol=any localip=%ls remoteip=any enable=yes profile=any",
         options->subnet);
     if (!run_netsh(command)) return 0;
 
     _snwprintf_s(command, ARRAYSIZE(command), _TRUNCATE,
-        L"advfirewall firewall add rule name=\"WEL room ICMPv4 inbound\" dir=in action=allow protocol=icmpv4:any,any remoteip=%ls enable=yes profile=any",
+        L"advfirewall firewall add rule name=\"WEL room UDP inbound\" dir=in action=allow protocol=udp localip=%ls remoteip=any enable=yes profile=any",
         options->subnet);
     if (!run_netsh(command)) return 0;
 
     _snwprintf_s(command, ARRAYSIZE(command), _TRUNCATE,
-        L"advfirewall firewall add rule name=\"WEL room ICMPv4 outbound\" dir=out action=allow protocol=icmpv4:any,any remoteip=%ls enable=yes profile=any",
+        L"advfirewall firewall add rule name=\"WEL room UDP outbound\" dir=out action=allow protocol=udp localip=%ls remoteip=any enable=yes profile=any",
+        options->subnet);
+    if (!run_netsh(command)) return 0;
+
+    _snwprintf_s(command, ARRAYSIZE(command), _TRUNCATE,
+        L"advfirewall firewall add rule name=\"WEL room ICMPv4 inbound\" dir=in action=allow protocol=icmpv4:any,any localip=%ls remoteip=any enable=yes profile=any",
+        options->subnet);
+    if (!run_netsh(command)) return 0;
+
+    _snwprintf_s(command, ARRAYSIZE(command), _TRUNCATE,
+        L"advfirewall firewall add rule name=\"WEL room ICMPv4 outbound\" dir=out action=allow protocol=icmpv4:any,any localip=%ls remoteip=any enable=yes profile=any",
         options->subnet);
     return run_netsh(command);
 }
