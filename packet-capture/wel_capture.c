@@ -37,6 +37,8 @@ typedef struct {
     wchar_t output_file[MAX_CAPTURE_PATH];
     wchar_t etl_file[MAX_CAPTURE_PATH];
     wchar_t role[16];
+    wchar_t pktmon_path[MAX_PATH];
+    wchar_t netsh_path[MAX_PATH];
     capture_mode mode;
     FILETIME started;
 } capture_session;
@@ -89,13 +91,20 @@ static int ensure_directory(const wchar_t *directory) {
     return GetLastError() == ERROR_ALREADY_EXISTS;
 }
 
-static int command_exists(const wchar_t *name) {
-    wchar_t path[MAX_PATH];
-    return SearchPathW(NULL, name, NULL, ARRAYSIZE(path), path, NULL) > 0;
-}
-
 static int locate_command(const wchar_t *name, wchar_t *path, DWORD path_count) {
-    return SearchPathW(NULL, name, NULL, path_count, path, NULL) > 0;
+    wchar_t windows_directory[MAX_PATH];
+    wchar_t native_path[MAX_PATH];
+    DWORD length = GetWindowsDirectoryW(windows_directory, ARRAYSIZE(windows_directory));
+    path[0] = L'\0';
+    if (length > 0 && length < ARRAYSIZE(windows_directory)) {
+        _snwprintf_s(native_path, ARRAYSIZE(native_path), _TRUNCATE, L"%ls\\Sysnative\\%ls", windows_directory, name);
+        if (GetFileAttributesW(native_path) != INVALID_FILE_ATTRIBUTES) {
+            wcsncpy_s(path, path_count, native_path, _TRUNCATE);
+            return 1;
+        }
+    }
+    length = SearchPathW(NULL, name, NULL, path_count, path, NULL);
+    return length > 0 && length < path_count;
 }
 
 static DWORD run_command(const wchar_t *command_line, const wchar_t *working_directory, const wchar_t *output_file, DWORD timeout_ms) {
@@ -468,29 +477,42 @@ static int create_archive(void) {
 static int start_packet_capture(void) {
     wchar_t log[MAX_CAPTURE_PATH];
     wchar_t command[MAX_CAPTURE_PATH + 256];
-    wchar_t pktmon_path[MAX_PATH];
     DWORD result;
     make_path(g_session.etl_file, ARRAYSIZE(g_session.etl_file), g_session.work_directory, L"packets.etl");
     DeleteFileW(g_session.etl_file);
-    make_path(log, ARRAYSIZE(log), g_session.work_directory, L"capture-start.txt");
-    if (locate_command(L"pktmon.exe", pktmon_path, ARRAYSIZE(pktmon_path))) {
-        _snwprintf_s(command, ARRAYSIZE(command), _TRUNCATE, L"\"%ls\" stop", pktmon_path);
+    locate_command(L"pktmon.exe", g_session.pktmon_path, ARRAYSIZE(g_session.pktmon_path));
+    locate_command(L"netsh.exe", g_session.netsh_path, ARRAYSIZE(g_session.netsh_path));
+    if (g_session.pktmon_path[0] != L'\0') {
+        _snwprintf_s(command, ARRAYSIZE(command), _TRUNCATE, L"\"%ls\" stop", g_session.pktmon_path);
+        make_path(log, ARRAYSIZE(log), g_session.work_directory, L"pktmon-stop-before.txt");
         run_command(command, g_session.work_directory, log, 10000);
-        _snwprintf_s(command, ARRAYSIZE(command), _TRUNCATE, L"\"%ls\" filter remove", pktmon_path);
+        _snwprintf_s(command, ARRAYSIZE(command), _TRUNCATE, L"\"%ls\" filter remove", g_session.pktmon_path);
+        make_path(log, ARRAYSIZE(log), g_session.work_directory, L"pktmon-filter-reset.txt");
         run_command(command, g_session.work_directory, log, 10000);
-        _snwprintf_s(command, ARRAYSIZE(command), _TRUNCATE, L"\"%ls\" start --capture --pkt-size 0 --file-name \"%ls\"", pktmon_path, g_session.etl_file);
+        _snwprintf_s(command, ARRAYSIZE(command), _TRUNCATE, L"\"%ls\" start --capture --pkt-size 0 --file-name \"%ls\"", g_session.pktmon_path, g_session.etl_file);
+        make_path(log, ARRAYSIZE(log), g_session.work_directory, L"pktmon-start.txt");
         result = run_command(command, g_session.work_directory, log, 30000);
         if (result == 0) { g_session.mode = CAPTURE_PKTMON; return 1; }
-        _snwprintf_s(command, ARRAYSIZE(command), _TRUNCATE, L"\"%ls\" start --capture --file-name \"%ls\"", pktmon_path, g_session.etl_file);
+        _snwprintf_s(command, ARRAYSIZE(command), _TRUNCATE, L"\"%ls\" start --capture --file-name \"%ls\"", g_session.pktmon_path, g_session.etl_file);
+        make_path(log, ARRAYSIZE(log), g_session.work_directory, L"pktmon-start-fallback.txt");
         result = run_command(command, g_session.work_directory, log, 30000);
         if (result == 0) { g_session.mode = CAPTURE_PKTMON; return 1; }
-        post_status(L"pktmon start failed (code %lu); trying Windows trace fallback.", (unsigned long)result);
+        post_status(L"pktmon start failed (code %lu); see pktmon-start*.txt. Trying Windows trace fallback.", (unsigned long)result);
+    } else {
+        post_status(L"pktmon.exe was not found.");
     }
-    if (command_exists(L"netsh.exe")) {
-        run_command(L"netsh.exe trace stop", g_session.work_directory, log, 10000);
+    if (g_session.netsh_path[0] != L'\0') {
+        _snwprintf_s(command, ARRAYSIZE(command), _TRUNCATE, L"\"%ls\" trace stop", g_session.netsh_path);
+        make_path(log, ARRAYSIZE(log), g_session.work_directory, L"netsh-stop-before.txt");
+        run_command(command, g_session.work_directory, log, 10000);
         _snwprintf_s(command, ARRAYSIZE(command), _TRUNCATE,
-            L"netsh.exe trace start capture=yes persistent=no overwrite=yes maxsize=512 correlation=yes tracefile=\"%ls\"", g_session.etl_file);
-        if (run_command(command, g_session.work_directory, log, 30000) == 0) { g_session.mode = CAPTURE_NETSH; return 1; }
+            L"\"%ls\" trace start capture=yes persistent=no overwrite=yes maxsize=512 correlation=yes tracefile=\"%ls\"", g_session.netsh_path, g_session.etl_file);
+        make_path(log, ARRAYSIZE(log), g_session.work_directory, L"netsh-start.txt");
+        result = run_command(command, g_session.work_directory, log, 30000);
+        if (result == 0) { g_session.mode = CAPTURE_NETSH; return 1; }
+        post_status(L"Windows trace fallback failed (code %lu); see netsh-start.txt.", (unsigned long)result);
+    } else {
+        post_status(L"netsh.exe was not found.");
     }
     post_status(L"No usable Windows packet capture session could be started.");
     return 0;
@@ -502,17 +524,21 @@ static void stop_packet_capture(void) {
     wchar_t command[MAX_CAPTURE_PATH + 256];
     make_path(log, ARRAYSIZE(log), g_session.work_directory, L"capture-stop.txt");
     if (g_session.mode == CAPTURE_PKTMON) {
-        run_command(L"pktmon.exe stop", g_session.work_directory, log, 60000);
+        _snwprintf_s(command, ARRAYSIZE(command), _TRUNCATE, L"\"%ls\" stop", g_session.pktmon_path);
+        run_command(command, g_session.work_directory, log, 60000);
         make_path(conversion_log, ARRAYSIZE(conversion_log), g_session.work_directory, L"capture-text-convert.txt");
-        _snwprintf_s(command, ARRAYSIZE(command), _TRUNCATE, L"pktmon.exe etl2txt \"%ls\" -o \"%ls\\packets.txt\"", g_session.etl_file, g_session.work_directory);
+        _snwprintf_s(command, ARRAYSIZE(command), _TRUNCATE, L"\"%ls\" etl2txt \"%ls\" -o \"%ls\\packets.txt\"", g_session.pktmon_path, g_session.etl_file, g_session.work_directory);
         run_command(command, g_session.work_directory, conversion_log, 60000);
         make_path(conversion_log, ARRAYSIZE(conversion_log), g_session.work_directory, L"capture-pcap-convert.txt");
-        _snwprintf_s(command, ARRAYSIZE(command), _TRUNCATE, L"pktmon.exe etl2pcap \"%ls\" -o \"%ls\\packets.pcapng\"", g_session.etl_file, g_session.work_directory);
+        _snwprintf_s(command, ARRAYSIZE(command), _TRUNCATE, L"\"%ls\" etl2pcap \"%ls\" -o \"%ls\\packets.pcapng\"", g_session.pktmon_path, g_session.etl_file, g_session.work_directory);
         if (run_command(command, g_session.work_directory, conversion_log, 60000) != 0) {
-            _snwprintf_s(command, ARRAYSIZE(command), _TRUNCATE, L"pktmon.exe etl2pcap \"%ls\" --out \"%ls\\packets.pcapng\"", g_session.etl_file, g_session.work_directory);
+            _snwprintf_s(command, ARRAYSIZE(command), _TRUNCATE, L"\"%ls\" etl2pcap \"%ls\" --out \"%ls\\packets.pcapng\"", g_session.pktmon_path, g_session.etl_file, g_session.work_directory);
             run_command(command, g_session.work_directory, conversion_log, 60000);
         }
-    } else run_command(L"netsh.exe trace stop", g_session.work_directory, log, 60000);
+    } else if (g_session.netsh_path[0] != L'\0') {
+        _snwprintf_s(command, ARRAYSIZE(command), _TRUNCATE, L"\"%ls\" trace stop", g_session.netsh_path);
+        run_command(command, g_session.work_directory, log, 60000);
+    }
 }
 
 static DWORD WINAPI start_capture_thread(LPVOID unused) {

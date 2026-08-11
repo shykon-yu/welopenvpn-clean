@@ -75,6 +75,10 @@ jobs:
           & "frontend/resources/welhelper/welfirewall.exe" --self-test
           if ($LASTEXITCODE -ne 0) { throw 'Windows firewall authorization helper self-test failed' }
       - name: Build standalone network capture utility
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+      - name: Compile standalone network capture utility
         shell: pwsh
         working-directory: ${{ github.workspace }}
         run: |
