@@ -53,52 +53,22 @@ jobs:
           if (Test-Path frontend/resources/welhelper/fonta0.exe) { throw 'fonta0.exe must never be packaged' }
       - uses: ilammy/msvc-dev-cmd@v1
         with:
-          arch: x64
-      - name: Build game broadcast helpers
+          arch: x86
+      - name: Build WE8 socket-binding runtime
         shell: pwsh
         working-directory: ${{ github.workspace }}
         run: |
           $ErrorActionPreference = 'Stop'
-          $compatArchive = 'third_party/windivert/WinDivert-1.4.3-A.zip'
-          $modernArchive = 'third_party/windivert/WinDivert-2.2.2-A.zip'
-          if (-not (Test-Path $compatArchive)) { throw "Missing WinDivert archive: $compatArchive" }
-          if (-not (Test-Path $modernArchive)) { throw "Missing WinDivert archive: $modernArchive" }
-
-          Remove-Item .windivert-build -Recurse -Force -ErrorAction SilentlyContinue
-          New-Item .windivert-build -ItemType Directory | Out-Null
-          Expand-Archive -LiteralPath $compatArchive -DestinationPath .windivert-build/compat
-          Expand-Archive -LiteralPath $modernArchive -DestinationPath .windivert-build/modern
-
-          function Build-WelBroadcastHelper($sourceRoot, $architecture, $outputDirectory, $modern) {
-            New-Item $outputDirectory -ItemType Directory -Force | Out-Null
-            $defines = @()
-            if ($modern) { $defines += '/DWEL_WINDIVERT_V2=1' }
-            & cl.exe /nologo /W4 /O2 /MT /D_CRT_SECURE_NO_WARNINGS @defines `
-              native/wel-broadcast/wel_broadcast.c `
-              "/I$sourceRoot/include" `
-              "/Fe:$outputDirectory/welnet.exe" `
-              /link "/LIBPATH:$sourceRoot/$architecture" WinDivert.lib
-            if ($LASTEXITCODE -ne 0) { throw "welnet.exe build failed for $sourceRoot" }
-            Copy-Item "$sourceRoot/$architecture/WinDivert.dll" $outputDirectory -Force
-            Copy-Item "$sourceRoot/$architecture/WinDivert64.sys" $outputDirectory -Force
-            Copy-Item "$sourceRoot/LICENSE" "$outputDirectory/WinDivert-LICENSE.txt" -Force
-          }
-
-          Build-WelBroadcastHelper `
-            '.windivert-build/compat/WinDivert-1.4.3-A' `
-            'x86_64' `
-            'frontend/resources/welhelper/net-compat' `
-            $false
-          Build-WelBroadcastHelper `
-            '.windivert-build/modern/WinDivert-2.2.2-A' `
-            'x64' `
-            'frontend/resources/welhelper/net-modern' `
-            $true
-
-          & frontend/resources/welhelper/net-compat/welnet.exe --self-test
-          if ($LASTEXITCODE -ne 0) { throw 'WinDivert 1.4 helper self-test failed' }
-          & frontend/resources/welhelper/net-modern/welnet.exe --self-test
-          if ($LASTEXITCODE -ne 0) { throw 'WinDivert 2.2 helper self-test failed' }
+          $output = 'frontend/resources/welhelper/game-runtime'
+          New-Item $output -ItemType Directory -Force | Out-Null
+          & cl.exe /nologo /W4 /O2 /MT /D_CRT_SECURE_NO_WARNINGS /D_WIN32_WINNT=0x0601 `
+            /LD native/wel-game/wel_game_hook.c /Fe:"$output/welhook.dll" /link Ws2_32.lib Psapi.lib
+          if ($LASTEXITCODE -ne 0) { throw 'welhook.dll build failed' }
+          & cl.exe /nologo /W4 /O2 /MT /D_CRT_SECURE_NO_WARNINGS /D_WIN32_WINNT=0x0601 `
+            native/wel-game/wel_game_launcher.c /Fe:"$output/welgame.exe"
+          if ($LASTEXITCODE -ne 0) { throw 'welgame.exe build failed' }
+          & "$output/welgame.exe" --self-test
+          if ($LASTEXITCODE -ne 0) { throw 'WE8 socket launcher self-test failed' }
       - uses: actions/setup-node@v4
         with:
           node-version: 18
@@ -135,14 +105,8 @@ jobs:
             'resources/welhelper/edge.exe',
             'resources/welhelper/n2n-LICENSE.txt',
             'resources/welhelper/n2n-source-notice.txt',
-            'resources/welhelper/net-compat/welnet.exe',
-            'resources/welhelper/net-compat/WinDivert.dll',
-            'resources/welhelper/net-compat/WinDivert64.sys',
-            'resources/welhelper/net-compat/WinDivert-LICENSE.txt',
-            'resources/welhelper/net-modern/welnet.exe',
-            'resources/welhelper/net-modern/WinDivert.dll',
-            'resources/welhelper/net-modern/WinDivert64.sys',
-            'resources/welhelper/net-modern/WinDivert-LICENSE.txt',
+            'resources/welhelper/game-runtime/welgame.exe',
+            'resources/welhelper/game-runtime/welhook.dll',
             'resources/openvpn/bin/tapctl.exe',
             'build/tap-windows-9.21.2.exe'
           )

@@ -4,8 +4,6 @@ const path = require('node:path')
 const { spawn } = require('node:child_process')
 const { formatProcessExitCode, inspectVpnNetwork, runPowerShell, runProcess, waitForVpnNetwork } = require('./network.cjs')
 const { ensureEdgeFirewall, ensureRoomUdpFirewall } = require('./firewall.cjs')
-const { ensureBroadcastRoute, removeBroadcastRoute } = require('./broadcast-route.cjs')
-const { startGameBroadcastRedirect, stopGameBroadcastRedirect } = require('./game-broadcast.cjs')
 
 const DEFAULT_HOST = '8.133.189.9'
 const DEFAULT_PORT = 22222
@@ -465,12 +463,10 @@ async function stopConnection() {
   const current = connection
   connection = null
   try {
-    try { await stopGameBroadcastRedirect(current.broadcastProcess) } catch {}
     try { current.process.kill() } catch {}
     const exited = await waitForProcessExit(current.process, STOP_TIMEOUT_MS)
     if (!exited) try { current.process.kill('SIGKILL') } catch {}
   } finally {
-    try { await removeBroadcastRoute(current.broadcastRoute) } catch {}
     removeFiles(current.temporaryFiles)
   }
 }
@@ -488,6 +484,10 @@ function status() {
       ? '联机组件已准备好'
       : '未检测到 n2n 联机组件，请重新运行完整安装包。',
   }
+}
+
+function activeNetwork() {
+  return connection?.network ? { ...connection.network } : null
 }
 
 function wait(ms) {
@@ -639,9 +639,6 @@ async function connectAttempt({ executable, host, port, roomID, username, subnet
     else if (connection?.process === child) {
       const current = connection
       connection = null
-      stopGameBroadcastRedirect(current.broadcastProcess)
-        .then(() => removeBroadcastRoute(current.broadcastRoute))
-        .catch(() => {})
       removeFiles(current.temporaryFiles)
     }
   })
@@ -649,8 +646,7 @@ async function connectAttempt({ executable, host, port, roomID, username, subnet
     process: child,
     temporaryFiles: [files.configPath],
     logPath: files.logPath,
-    broadcastRoute: null,
-    broadcastProcess: null,
+    network: null,
   }
 
   try {
@@ -665,23 +661,11 @@ async function connectAttempt({ executable, host, port, roomID, username, subnet
         const network = await waitForVpnNetwork(subnetCidr, 3000)
         if (network.connected && (!virtualIP || network.actualIp === virtualIP)) {
           const inspectedNetwork = await inspectVpnNetwork(subnetCidr)
-          const broadcastRoute = await ensureBroadcastRoute(inspectedNetwork)
           if (failed || child.exitCode !== null) {
-            await removeBroadcastRoute(broadcastRoute)
-            throw new Error(failed || 'n2n 进程在配置游戏广播路由时退出')
+            throw new Error(failed || 'n2n 进程在获取游戏 TAP 网卡时退出')
           }
-          connection.broadcastRoute = broadcastRoute
-          const broadcastProcess = await startGameBroadcastRedirect(inspectedNetwork, subnetCidr, files.logPath)
-          if (failed || child.exitCode !== null || connection?.process !== child) {
-            await stopGameBroadcastRedirect(broadcastProcess)
-            throw new Error(failed || 'n2n 进程在配置游戏广播组件时退出')
-          }
-          connection.broadcastProcess = broadcastProcess
-          broadcastProcess?.process.once('close', () => {
-            if (!broadcastProcess.stopping && connection?.broadcastProcess === broadcastProcess) {
-              try { connection.process.kill() } catch {}
-            }
-          })
+          if (connection?.process !== child) throw new Error('n2n 连接在准备游戏网络时已关闭')
+          connection.network = inspectedNetwork
           initialized = true
           return inspectedNetwork
         }
@@ -742,6 +726,7 @@ module.exports = {
   CONNECT_TIMEOUT_MS,
   N2N_PROGRESS,
   TAP_NAME,
+  activeNetwork,
   buildEdgeArgs,
   connect,
   isWelTapAdapter,

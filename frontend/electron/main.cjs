@@ -6,6 +6,7 @@ const { pathToFileURL } = require('node:url')
 const { version: appVersion } = require('../package.json')
 const { decodeProcessOutput, inspectVpnNetwork } = require('./network.cjs')
 const { ensureWe8Firewall } = require('./firewall.cjs')
+const { launchGameBound } = require('./game-launch.cjs')
 const openvpn = require('./openvpn.cjs')
 
 if (process.platform === 'win32') {
@@ -174,17 +175,17 @@ ipcMain.handle('choose-game', async (event) => {
   const result = await dialog.showOpenDialog(BrowserWindow.fromWebContents(event.sender), { title: '选择 WE8 游戏程序', properties: ['openFile'], filters: [{ name: 'WE8 游戏程序', extensions: ['exe'] }] })
   return result.canceled ? null : result.filePaths[0] || null
 })
-ipcMain.handle('launch-game', (_event, gamePath) => {
+ipcMain.handle('launch-game', async (_event, gamePath) => {
   const executable = resolveGameExecutable(gamePath)
-  return new Promise((resolve, reject) => {
-    ensureWe8Firewall(executable).catch((error) => {
-      writeLog('配置 WE8 防火墙规则失败', error)
-    }).finally(() => {
-      const child = spawn('cmd.exe', ['/d', '/c', 'start', '""', executable], { detached: true, windowsHide: true, stdio: 'ignore' })
-      child.once('error', reject)
-      child.once('spawn', () => { child.unref(); resolve() })
-    })
-  })
+  const network = openvpn.activeNetwork()
+  if (!network?.connected) throw new Error('请先进入房间并等待 WEL TAP 网卡连接完成')
+  try {
+    await ensureWe8Firewall(executable)
+  } catch (error) {
+    writeLog('配置 WE8 防火墙规则失败', error)
+  }
+  const result = await launchGameBound(executable, network)
+  writeLog(`WE8 已通过 TAP Socket 绑定启动：${result}`)
 })
 
 process.on('uncaughtException', (error) => showFatalError(error))

@@ -10,11 +10,11 @@ This directory must contain:
 - `tapctl.exe`, copied from the signed TAP-Windows runtime.
 - `weltap.exe`, the signed TAP-Windows driver installer for first-run setup.
 - `n2n-source-notice.txt`, describing the source revision and license.
-- `net-compat/`, the Windows 7/8/10 discovery broadcast runtime.
-- `net-modern/`, the Windows 10/11 discovery broadcast runtime.
+- `game-runtime/welgame.exe`, the x86 launcher for WE8.
+- `game-runtime/welhook.dll`, the x86 WE8 socket-binding module.
 
-Each broadcast runtime contains `welnet.exe`, the matching official signed
-WinDivert DLL and driver, and `WinDivert-LICENSE.txt`. Only limited outbound
-UDP discovery packets to `255.255.255.255:5739` are redirected.
+The launcher starts WE8 suspended, loads the socket module, and then resumes
+the game. The module binds WE8 UDP sockets to the active TAP IP and changes
+only discovery broadcasts to the active room's directed broadcast address.
 
 Do not copy `fonta0.exe` into this directory or into the installer.
