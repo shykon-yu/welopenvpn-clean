@@ -81,12 +81,22 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $output = '.capture-build'
           New-Item $output -ItemType Directory -Force | Out-Null
-          & rc.exe /nologo /fo "$output/app.res" packet-capture/app.rc
-          if ($LASTEXITCODE -ne 0) { throw 'network capture manifest build failed' }
-          & cl.exe /nologo /W4 /O2 /MT /utf-8 /DUNICODE /D_UNICODE /D_WIN32_WINNT=0x0601 `
+          $rcOutput = & rc.exe /nologo /fo "$output/app.res" packet-capture/app.rc 2>&1
+          $rcExit = $LASTEXITCODE
+          $rcOutput | ForEach-Object { Write-Host $_ }
+          if ($rcExit -ne 0) {
+            $rcOutput | ForEach-Object { Write-Host "::error title=Resource compiler::$_" }
+            throw 'network capture manifest build failed'
+          }
+          $clOutput = & cl.exe /nologo /W4 /O2 /MT /utf-8 /DUNICODE /D_UNICODE /D_WIN32_WINNT=0x0601 `
             packet-capture/wel_capture.c "$output/app.res" /Fe:"$output/WEL网络诊断工具.exe" `
-            /link /SUBSYSTEM:WINDOWS Ws2_32.lib Iphlpapi.lib Shell32.lib Comctl32.lib
-          if ($LASTEXITCODE -ne 0) { throw 'standalone network capture utility build failed' }
+            /link /SUBSYSTEM:WINDOWS Ws2_32.lib Iphlpapi.lib Shell32.lib Comctl32.lib 2>&1
+          $clExit = $LASTEXITCODE
+          $clOutput | ForEach-Object { Write-Host $_ }
+          if ($clExit -ne 0) {
+            $clOutput | ForEach-Object { Write-Host "::error title=MSVC::$_" }
+            throw 'standalone network capture utility build failed'
+          }
       - uses: actions/setup-node@v4
         with:
           node-version: 18
