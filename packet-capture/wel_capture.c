@@ -442,6 +442,7 @@ static int create_archive(void) {
     zip_entry entries[MAX_ZIP_ENTRIES];
     DWORD count = 0;
     DWORD central_offset;
+    DWORD central_size;
     DWORD index;
     SYSTEMTIME now;
     zip = _wfopen(g_session.output_file, L"wb");
@@ -467,9 +468,10 @@ static int create_archive(void) {
         zip_u16(zip, 0); zip_u16(zip, 0); zip_u16(zip, 0); zip_u16(zip, 0); zip_u32(zip, 0); zip_u32(zip, entries[index].offset);
         fwrite(entries[index].name, 1, name_length, zip);
     }
+    central_size = (DWORD)ftell(zip) - central_offset;
     GetLocalTime(&now);
     zip_u32(zip, 0x06054b50UL); zip_u16(zip, 0); zip_u16(zip, 0); zip_u16(zip, (WORD)count); zip_u16(zip, (WORD)count);
-    zip_u32(zip, (DWORD)ftell(zip) - central_offset); zip_u32(zip, central_offset); zip_u16(zip, 0);
+    zip_u32(zip, central_size); zip_u32(zip, central_offset); zip_u16(zip, 0);
     fclose(zip);
     return count > 0;
 }
