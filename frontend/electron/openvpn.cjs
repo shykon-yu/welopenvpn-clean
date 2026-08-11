@@ -3,7 +3,7 @@ const os = require('node:os')
 const path = require('node:path')
 const { spawn } = require('node:child_process')
 const { formatProcessExitCode, inspectVpnNetwork, runPowerShell, runProcess, waitForVpnNetwork } = require('./network.cjs')
-const { ensureNativeRoomFirewall, roomFirewallRulesPresent } = require('./firewall.cjs')
+const { ensureEdgeFirewall, ensureRoomUdpFirewall, ensureWin7RoomFirewall, isWindows7, win7FirewallRulesPresent } = require('./firewall.cjs')
 
 const DEFAULT_HOST = '8.133.189.9'
 const DEFAULT_PORT = 22222
@@ -695,9 +695,18 @@ async function connect({ host, port, roomID, username, subnetCidr, virtualIP, co
   const prepared = await prepare()
   const tapNode = prepared.tapNode
   const transportBindIP = await findBestTransportIPv4(host || DEFAULT_HOST)
-  if (process.platform === 'win32' && !await roomFirewallRulesPresent(subnetCidr, executable)) {
-    if (typeof requestFirewallAccess === 'function') await requestFirewallAccess()
-    await ensureNativeRoomFirewall(subnetCidr, executable)
+  if (isWindows7()) {
+    if (!win7FirewallRulesPresent(executable)) {
+      if (typeof requestFirewallAccess === 'function') await requestFirewallAccess()
+      await ensureWin7RoomFirewall(executable)
+    }
+  } else {
+    try {
+      await ensureEdgeFirewall(executable)
+    } catch {
+      // Other Windows versions can keep the normal firewall confirmation flow.
+    }
+    await ensureRoomUdpFirewall(subnetCidr)
   }
 
   let lastError = null

@@ -28,7 +28,7 @@ test('starts WE8 through the TAP socket-binding launcher only after room connect
   assert.doesNotMatch(client, /cmd\.exe'.*start/)
 })
 
-test('asks users before requesting native firewall authorization', () => {
+test('asks users before requesting native firewall authorization when Win7 rules are missing', () => {
   assert.match(client, /requestFirewallAccess/)
   assert.match(client, /需要 Windows 防火墙授权/)
   assert.match(client, /允许并进入/)

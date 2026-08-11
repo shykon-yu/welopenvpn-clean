@@ -9,9 +9,6 @@ const ROOM_UDP_INBOUND_RULE = 'WEL room UDP inbound'
 const ROOM_UDP_OUTBOUND_RULE = 'WEL room UDP outbound'
 const ROOM_ICMP_INBOUND_RULE = 'WEL room ICMPv4 inbound'
 const ROOM_ICMP_OUTBOUND_RULE = 'WEL room ICMPv4 outbound'
-const ROOM_IP_INBOUND_RULE = 'WEL room IP inbound'
-const ROOM_IP_OUTBOUND_RULE = 'WEL room IP outbound'
-const EDGE_OUTBOUND_RULE = 'WEL n2n edge outbound'
 const LEGACY_GAME_DISCOVERY_RULE = 'WEL game discovery UDP 5739 inbound'
 const LEGACY_WE8_RULES = [
   'WEL WE8 UDP 5739 Inbound',
@@ -29,6 +26,13 @@ const LEGACY_TAP_RULES = [
   'WEL TAP UDP Inbound',
   'WEL TAP UDP Outbound',
 ]
+const WEL_ROOM_FIREWALL_SUBNET_CIDR = '10.222.0.0/16'
+const WIN7_FIREWALL_RULE_VERSION = 2
+const WIN7_FIREWALL_STATE_PATH = path.join(
+  process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local'),
+  'WELPlatform',
+  'firewall-rules.json',
+)
 
 function isWindows7(release = os.release()) {
   return /^6\.1(?:\.|$)/.test(String(release || ''))
@@ -52,28 +56,38 @@ function firewallHelperExitReason(code) {
   return `Windows 防火墙授权程序退出（代码 ${code ?? '未知'}）`
 }
 
-const NATIVE_ROOM_FIREWALL_RULES = [
-  EDGE_INBOUND_RULE,
-  EDGE_OUTBOUND_RULE,
-  ROOM_IP_INBOUND_RULE,
-  ROOM_IP_OUTBOUND_RULE,
-]
+function normalizeFirewallProgramPath(programPath) {
+  return String(programPath || '').trim().replace(/\//g, '\\').toLowerCase()
+}
 
-async function roomFirewallRulesPresent(subnetCidr, edgePath) {
-  if (process.platform !== 'win32') return true
+function win7FirewallRulesPresent(edgePath) {
   try {
-    const localAddress = cidrToFirewallSubnet(subnetCidr)
-    return await firewallRulesExist(NATIVE_ROOM_FIREWALL_RULES, { localAddress, programPath: edgePath })
+    const state = JSON.parse(fs.readFileSync(WIN7_FIREWALL_STATE_PATH, 'utf8'))
+    return state.version === WIN7_FIREWALL_RULE_VERSION &&
+      state.edgePath === normalizeFirewallProgramPath(edgePath)
   } catch {
     return false
   }
 }
 
-async function ensureNativeRoomFirewall(subnetCidr, edgePath) {
+function rememberWin7FirewallRules(edgePath) {
+  try {
+    fs.mkdirSync(path.dirname(WIN7_FIREWALL_STATE_PATH), { recursive: true })
+    fs.writeFileSync(WIN7_FIREWALL_STATE_PATH, JSON.stringify({
+      version: WIN7_FIREWALL_RULE_VERSION,
+      edgePath: normalizeFirewallProgramPath(edgePath),
+    }), 'utf8')
+  } catch {
+    // The firewall rules are already active; a later room entry can retry
+    // persisting the marker without interrupting the connection.
+  }
+}
+
+async function ensureWin7RoomFirewall(edgePath) {
   if (process.platform !== 'win32') return false
   const helper = locateFirewallHelper()
-  if (!helper) throw new Error('未找到 Windows 防火墙授权组件，请安装最新完整客户端')
-  const subnet = cidrToFirewallSubnet(subnetCidr)
+  if (!helper) throw new Error('未找到 Windows 7 防火墙授权组件，请安装最新完整客户端')
+  const subnet = cidrToFirewallSubnet(WEL_ROOM_FIREWALL_SUBNET_CIDR)
   try {
     await runProcess(helper, ['--subnet', subnet, '--edge', edgePath], 45000)
   } catch (error) {
@@ -81,6 +95,7 @@ async function ensureNativeRoomFirewall(subnetCidr, edgePath) {
     if (match) throw new Error(firewallHelperExitReason(Number(match[1])))
     throw new Error(`Windows 防火墙授权失败：${error.message}`)
   }
+  rememberWin7FirewallRules(edgePath)
   return true
 }
 
@@ -177,8 +192,7 @@ foreach ($definition in $ruleDefinitions) {
   $rule.Name = $definition.Name
   $rule.Description = $definition.Description
   $rule.Protocol = $definition.Protocol
-  $rule.LocalAddresses = '${escapePowerShellSingleQuoted(subnet)}'
-  $rule.RemoteAddresses = '*'
+  $rule.RemoteAddresses = '${escapePowerShellSingleQuoted(subnet)}'
   $rule.Direction = $definition.Direction
   $rule.Action = 1
   $rule.Enabled = $true
@@ -188,26 +202,16 @@ foreach ($definition in $ruleDefinitions) {
 `
 }
 
-function buildFirewallRuleCheckScript(ruleNames, options = {}) {
+function buildFirewallRuleCheckScript(ruleNames) {
   const powershellRuleNames = ruleNames.map((name) => `'${escapePowerShellSingleQuoted(name)}'`).join(', ')
-  const localAddress = escapePowerShellSingleQuoted(options.localAddress || '')
-  const remoteAddress = escapePowerShellSingleQuoted(options.remoteAddress || '')
-  const programPath = escapePowerShellSingleQuoted(options.programPath || '')
   return `
 $ErrorActionPreference = 'Stop'
 $policy = New-Object -ComObject HNetCfg.FwPolicy2
 $ruleNames = @(${powershellRuleNames})
-$expectedLocalAddress = '${localAddress}'
-$expectedRemoteAddress = '${remoteAddress}'
-$expectedProgramPath = '${programPath}'
 foreach ($ruleName in $ruleNames) {
   try {
     $rule = $policy.Rules.Item($ruleName)
-    $isEdgeRule = $ruleName -like 'WEL n2n edge *'
-    $localMatches = [string]::IsNullOrEmpty($expectedLocalAddress) -or $isEdgeRule -or ([string]$rule.LocalAddresses -eq $expectedLocalAddress)
-    $remoteMatches = [string]::IsNullOrEmpty($expectedRemoteAddress) -or $isEdgeRule -or ([string]$rule.RemoteAddresses -eq $expectedRemoteAddress)
-    $programMatches = [string]::IsNullOrEmpty($expectedProgramPath) -or (-not $isEdgeRule) -or ([string]$rule.ApplicationName -ieq $expectedProgramPath)
-    if ($null -ne $rule -and $rule.Enabled -and $rule.Action -eq 1 -and $localMatches -and $remoteMatches -and $programMatches) {
+    if ($null -ne $rule -and $rule.Enabled -and $rule.Action -eq 1) {
       [Console]::Out.WriteLine($ruleName)
     }
   } catch {}
@@ -215,8 +219,8 @@ foreach ($ruleName in $ruleNames) {
 `
 }
 
-async function firewallRulesExist(ruleNames, options = {}) {
-  const output = await runPowerShell(buildFirewallRuleCheckScript(ruleNames, options), 12000)
+async function firewallRulesExist(ruleNames) {
+  const output = await runPowerShell(buildFirewallRuleCheckScript(ruleNames), 12000)
   const found = new Set(String(output || '').split(/\r?\n/).map((line) => line.trim()).filter(Boolean))
   return ruleNames.every((name) => found.has(name))
 }
@@ -254,14 +258,11 @@ async function ensureRoomUdpFirewall(subnetCidr) {
 module.exports = {
   LEGACY_WE8_RULES,
   EDGE_INBOUND_RULE,
-  EDGE_OUTBOUND_RULE,
   LEGACY_GAME_DISCOVERY_RULE,
   ROOM_UDP_INBOUND_RULE,
   ROOM_UDP_OUTBOUND_RULE,
   ROOM_ICMP_INBOUND_RULE,
   ROOM_ICMP_OUTBOUND_RULE,
-  ROOM_IP_INBOUND_RULE,
-  ROOM_IP_OUTBOUND_RULE,
   WE8_INBOUND_RULE,
   buildEdgeFirewallScript,
   buildFirewallRuleCheckScript,
@@ -271,12 +272,14 @@ module.exports = {
   cidrToFirewallSubnet,
   ensureEdgeFirewall,
   ensureRoomUdpFirewall,
-  ensureNativeRoomFirewall,
+  ensureWin7RoomFirewall,
   ensureWe8Firewall,
   firewallHelperCandidates,
   firewallHelperExitReason,
-  NATIVE_ROOM_FIREWALL_RULES,
-  roomFirewallRulesPresent,
   isWindows7,
   locateFirewallHelper,
+  normalizeFirewallProgramPath,
+  WEL_ROOM_FIREWALL_SUBNET_CIDR,
+  WIN7_FIREWALL_RULE_VERSION,
+  win7FirewallRulesPresent,
 }
