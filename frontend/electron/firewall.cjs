@@ -1,4 +1,4 @@
-const { runPowerShell } = require('./network.cjs')
+const { runElevatedPowerShell, runPowerShell } = require('./network.cjs')
 
 const EDGE_INBOUND_RULE = 'WEL n2n edge inbound'
 const WE8_INBOUND_RULE = 'WEL WE8 inbound'
@@ -107,7 +107,6 @@ $ruleNames = @(
 foreach ($ruleName in $ruleNames) {
   try { $policy.Rules.Remove($ruleName) } catch {}
 }
-
 $ruleDefinitions = @(
   @{ Name = '${ROOM_UDP_INBOUND_RULE}'; Protocol = 17; Direction = 1; Description = 'Allow inbound UDP traffic from the active WEL virtual room subnet.' },
   @{ Name = '${ROOM_UDP_OUTBOUND_RULE}'; Protocol = 17; Direction = 2; Description = 'Allow outbound UDP traffic to the active WEL virtual room subnet.' },
@@ -130,22 +129,107 @@ foreach ($definition in $ruleDefinitions) {
 `
 }
 
+function buildFirewallRuleCheckScript(ruleNames) {
+  const powershellRuleNames = ruleNames.map((name) => `'${escapePowerShellSingleQuoted(name)}'`).join(', ')
+  return `
+$ErrorActionPreference = 'Stop'
+$policy = New-Object -ComObject HNetCfg.FwPolicy2
+$ruleNames = @(${powershellRuleNames})
+foreach ($ruleName in $ruleNames) {
+  try {
+    $rule = $policy.Rules.Item($ruleName)
+    if ($null -ne $rule -and $rule.Enabled -and $rule.Action -eq 1) {
+      [Console]::Out.WriteLine($ruleName)
+    }
+  } catch {}
+}
+`
+}
+
+function buildNetshProgramInboundFirewallScript(ruleName, description, programPath, legacyRuleNames = []) {
+  const normalizedPath = String(programPath || '').trim()
+  if (!normalizedPath) throw new Error('防火墙程序路径为空')
+  const ruleNames = [ruleName, ...legacyRuleNames]
+  const powershellRuleNames = ruleNames.map((name) => `'${escapePowerShellSingleQuoted(name)}'`).join(', ')
+  return `
+$ErrorActionPreference = 'Stop'
+$netsh = Join-Path $env:SystemRoot 'System32\\netsh.exe'
+$ruleNames = @(${powershellRuleNames})
+foreach ($existingRuleName in $ruleNames) {
+  & $netsh advfirewall firewall delete rule "name=$existingRuleName" | Out-Null
+}
+& $netsh advfirewall firewall add rule "name=${escapePowerShellSingleQuoted(ruleName)}" dir=in action=allow "program=${escapePowerShellSingleQuoted(normalizedPath)}" enable=yes profile=any "description=${escapePowerShellSingleQuoted(description)}" | Out-Null
+if ($LASTEXITCODE -ne 0) { throw 'netsh failed to create the WEL program firewall rule' }
+`
+}
+
+function buildNetshRoomFirewallScript(subnetCidr) {
+  const subnet = cidrToFirewallSubnet(subnetCidr)
+  return `
+$ErrorActionPreference = 'Stop'
+$netsh = Join-Path $env:SystemRoot 'System32\\netsh.exe'
+$ruleNames = @(
+  '${LEGACY_GAME_DISCOVERY_RULE}',
+  '${ROOM_UDP_INBOUND_RULE}',
+  '${ROOM_UDP_OUTBOUND_RULE}',
+  '${ROOM_ICMP_INBOUND_RULE}',
+  '${ROOM_ICMP_OUTBOUND_RULE}'
+)
+foreach ($ruleName in $ruleNames) {
+  & $netsh advfirewall firewall delete rule "name=$ruleName" | Out-Null
+}
+& $netsh advfirewall firewall add rule "name=${ROOM_UDP_INBOUND_RULE}" dir=in action=allow protocol=udp "remoteip=${escapePowerShellSingleQuoted(subnet)}" enable=yes profile=any | Out-Null
+if ($LASTEXITCODE -ne 0) { throw 'netsh failed to create the inbound WEL UDP rule' }
+& $netsh advfirewall firewall add rule "name=${ROOM_UDP_OUTBOUND_RULE}" dir=out action=allow protocol=udp "remoteip=${escapePowerShellSingleQuoted(subnet)}" enable=yes profile=any | Out-Null
+if ($LASTEXITCODE -ne 0) { throw 'netsh failed to create the outbound WEL UDP rule' }
+& $netsh advfirewall firewall add rule "name=${ROOM_ICMP_INBOUND_RULE}" dir=in action=allow protocol=icmpv4:any,any "remoteip=${escapePowerShellSingleQuoted(subnet)}" enable=yes profile=any | Out-Null
+if ($LASTEXITCODE -ne 0) { throw 'netsh failed to create the inbound WEL ICMPv4 rule' }
+& $netsh advfirewall firewall add rule "name=${ROOM_ICMP_OUTBOUND_RULE}" dir=out action=allow protocol=icmpv4:any,any "remoteip=${escapePowerShellSingleQuoted(subnet)}" enable=yes profile=any | Out-Null
+if ($LASTEXITCODE -ne 0) { throw 'netsh failed to create the outbound WEL ICMPv4 rule' }
+`
+}
+
+async function firewallRulesExist(ruleNames) {
+  const output = await runPowerShell(buildFirewallRuleCheckScript(ruleNames), 12000)
+  const found = new Set(String(output || '').split(/\r?\n/).map((line) => line.trim()).filter(Boolean))
+  return ruleNames.every((name) => found.has(name))
+}
+
+async function ensureFirewallRules(primaryScript, fallbackScript, ruleNames) {
+  try {
+    await runPowerShell(primaryScript, 12000)
+    if (await firewallRulesExist(ruleNames)) return true
+  } catch {}
+
+  await runElevatedPowerShell(fallbackScript, 30000)
+  if (!await firewallRulesExist(ruleNames)) {
+    throw new Error(`Windows 防火墙规则创建失败：${ruleNames.join('、')}`)
+  }
+  return true
+}
+
 async function ensureEdgeFirewall(programPath) {
   if (process.platform !== 'win32') return false
-  await runPowerShell(buildEdgeFirewallScript(programPath), 12000)
-  return true
+  return ensureFirewallRules(
+    buildEdgeFirewallScript(programPath),
+    buildNetshProgramInboundFirewallScript(EDGE_INBOUND_RULE, 'Allow WEL n2n edge inbound traffic.', programPath, LEGACY_TAP_RULES),
+    [EDGE_INBOUND_RULE],
+  )
 }
 
 async function ensureWe8Firewall(programPath) {
   if (process.platform !== 'win32') return false
-  await runPowerShell(buildWe8FirewallScript(programPath), 12000)
-  return true
+  return ensureFirewallRules(
+    buildWe8FirewallScript(programPath),
+    buildNetshProgramInboundFirewallScript(WE8_INBOUND_RULE, 'Allow WEL WE8 inbound discovery and game traffic.', programPath, LEGACY_WE8_RULES),
+    [WE8_INBOUND_RULE],
+  )
 }
 
 async function ensureRoomUdpFirewall(subnetCidr) {
   if (process.platform !== 'win32') return false
-  await runPowerShell(buildRoomUdpFirewallScript(subnetCidr), 12000)
-  return true
+  const requiredRules = [ROOM_UDP_INBOUND_RULE, ROOM_UDP_OUTBOUND_RULE, ROOM_ICMP_INBOUND_RULE, ROOM_ICMP_OUTBOUND_RULE]
+  return ensureFirewallRules(buildRoomUdpFirewallScript(subnetCidr), buildNetshRoomFirewallScript(subnetCidr), requiredRules)
 }
 
 module.exports = {
@@ -158,6 +242,9 @@ module.exports = {
   ROOM_ICMP_OUTBOUND_RULE,
   WE8_INBOUND_RULE,
   buildEdgeFirewallScript,
+  buildFirewallRuleCheckScript,
+  buildNetshProgramInboundFirewallScript,
+  buildNetshRoomFirewallScript,
   buildRoomUdpFirewallScript,
   buildWe8FirewallScript,
   buildProgramInboundFirewallScript,

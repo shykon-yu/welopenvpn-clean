@@ -106,6 +106,18 @@ ${script}`
   })
 }
 
+async function runElevatedPowerShell(script, timeoutMs = 30000) {
+  const encoded = Buffer.from(script, 'utf16le').toString('base64')
+  const launcher = `
+$ErrorActionPreference = 'Stop'
+$powershell = Join-Path $env:SystemRoot 'System32\\WindowsPowerShell\\v1.0\\powershell.exe'
+$arguments = '-NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand ${encoded}'
+$process = Start-Process -FilePath $powershell -ArgumentList $arguments -Verb RunAs -Wait -PassThru
+exit $process.ExitCode
+`
+  await runPowerShell(launcher, timeoutMs)
+}
+
 function runProcess(file, args, timeoutMs = 5000) {
   return new Promise((resolve, reject) => {
     const child = spawn(file, args, { windowsHide: true })
@@ -228,6 +240,7 @@ module.exports = {
   parseAdapterOutput,
   parseTasklistPids,
   runPowerShell,
+  runElevatedPowerShell,
   runProcess,
   waitForVpnNetwork,
 }

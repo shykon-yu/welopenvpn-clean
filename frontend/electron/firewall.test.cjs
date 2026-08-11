@@ -2,6 +2,9 @@ const test = require('node:test')
 const assert = require('node:assert/strict')
 const {
   buildEdgeFirewallScript,
+  buildFirewallRuleCheckScript,
+  buildNetshProgramInboundFirewallScript,
+  buildNetshRoomFirewallScript,
   buildRoomUdpFirewallScript,
   buildWe8FirewallScript,
   cidrToFirewallSubnet,
@@ -58,4 +61,24 @@ test('normalizes CIDR networks to the firewall subnet format supported by Window
 
 test('rejects an empty firewall program path', () => {
   assert.throws(() => buildWe8FirewallScript(''), /防火墙程序路径为空/)
+})
+
+test('falls back to elevated netsh rules that work on Windows 7', () => {
+  const roomScript = buildNetshRoomFirewallScript('10.222.1.0/24')
+  assert.match(roomScript, /netsh\.exe/)
+  assert.match(roomScript, /protocol=udp/)
+  assert.match(roomScript, /protocol=icmpv4:any,any/)
+  assert.match(roomScript, /remoteip=10\.222\.1\.0\/255\.255\.255\.0/)
+  assert.match(roomScript, /profile=any/)
+
+  const programScript = buildNetshProgramInboundFirewallScript('WEL test', 'Allow WEL test.', 'C:\\Games\\WE8.exe')
+  assert.match(programScript, /program=C:\\Games\\WE8\.exe/)
+  assert.match(programScript, /dir=in/)
+})
+
+test('verifies that Windows actually retained every required firewall rule', () => {
+  const script = buildFirewallRuleCheckScript([ROOM_UDP_INBOUND_RULE, ROOM_ICMP_INBOUND_RULE])
+  assert.match(script, /HNetCfg\.FwPolicy2/)
+  assert.match(script, /\$rule\.Enabled/)
+  assert.match(script, /\$rule\.Action -eq 1/)
 })

@@ -700,11 +700,7 @@ async function connect({ host, port, roomID, username, subnetCidr, virtualIP, co
   } catch {
     // Non-elevated clients keep the normal Windows firewall confirmation flow.
   }
-  try {
-    await ensureRoomUdpFirewall(subnetCidr)
-  } catch {
-    // The n2n connection remains usable if a restricted Windows policy blocks rule creation.
-  }
+  await ensureRoomUdpFirewall(subnetCidr)
 
   let lastError = null
   for (let attempt = 1; attempt <= CONNECT_MAX_ATTEMPTS; attempt += 1) {
