@@ -2,11 +2,14 @@ const test = require('node:test')
 const assert = require('node:assert/strict')
 const {
   buildEdgeFirewallScript,
-  buildGameDiscoveryFirewallScript,
-  GAME_DISCOVERY_INBOUND_RULE,
+  buildRoomUdpFirewallScript,
   buildWe8FirewallScript,
+  cidrToFirewallSubnet,
   LEGACY_WE8_RULES,
   EDGE_INBOUND_RULE,
+  LEGACY_GAME_DISCOVERY_RULE,
+  ROOM_UDP_INBOUND_RULE,
+  ROOM_UDP_OUTBOUND_RULE,
   WE8_INBOUND_RULE,
 } = require('./firewall.cjs')
 
@@ -28,14 +31,23 @@ test('allows all inbound traffic for the bundled n2n edge executable', () => {
   assert.match(script, /\$rule\.Direction = 1/)
 })
 
-test('allows game discovery only from the active WEL virtual subnet', () => {
-  const script = buildGameDiscoveryFirewallScript('10.222.1.0/24')
-  assert.match(script, new RegExp(GAME_DISCOVERY_INBOUND_RULE))
+test('allows all room UDP traffic in both directions on the active WEL virtual subnet', () => {
+  const script = buildRoomUdpFirewallScript('10.222.1.0/24')
+  assert.match(script, new RegExp(ROOM_UDP_INBOUND_RULE))
+  assert.match(script, new RegExp(ROOM_UDP_OUTBOUND_RULE))
+  assert.match(script, new RegExp(LEGACY_GAME_DISCOVERY_RULE))
   assert.match(script, /\$rule\.Protocol = 17/)
-  assert.match(script, /\$rule\.LocalPorts = '5739'/)
-  assert.match(script, /\$rule\.RemoteAddresses = '10\.222\.1\.0\/24'/)
-  assert.match(script, /\$rule\.Direction = 1/)
-  assert.throws(() => buildGameDiscoveryFirewallScript('not-a-subnet'), /房间子网格式不正确/)
+  assert.match(script, /Direction = 1/)
+  assert.match(script, /Direction = 2/)
+  assert.match(script, /\$rule\.RemoteAddresses = '10\.222\.1\.0\/255\.255\.255\.0'/)
+  assert.doesNotMatch(script, /LocalPorts|RemotePorts|ApplicationName/)
+  assert.throws(() => buildRoomUdpFirewallScript('not-a-subnet'), /房间子网格式不正确/)
+  assert.throws(() => buildRoomUdpFirewallScript('10.222.999.0/24'), /房间子网格式不正确/)
+})
+
+test('normalizes CIDR networks to the firewall subnet format supported by Windows 7', () => {
+  assert.equal(cidrToFirewallSubnet('10.222.1.123/24'), '10.222.1.0/255.255.255.0')
+  assert.equal(cidrToFirewallSubnet('10.222.1.10/32'), '10.222.1.10/255.255.255.255')
 })
 
 test('rejects an empty firewall program path', () => {

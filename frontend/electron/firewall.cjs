@@ -2,7 +2,9 @@ const { runPowerShell } = require('./network.cjs')
 
 const EDGE_INBOUND_RULE = 'WEL n2n edge inbound'
 const WE8_INBOUND_RULE = 'WEL WE8 inbound'
-const GAME_DISCOVERY_INBOUND_RULE = 'WEL game discovery UDP 5739 inbound'
+const ROOM_UDP_INBOUND_RULE = 'WEL room UDP inbound'
+const ROOM_UDP_OUTBOUND_RULE = 'WEL room UDP outbound'
+const LEGACY_GAME_DISCOVERY_RULE = 'WEL game discovery UDP 5739 inbound'
 const LEGACY_WE8_RULES = [
   'WEL WE8 UDP 5739 Inbound',
   'WEL WE8 UDP 5739 Outbound',
@@ -22,6 +24,22 @@ const LEGACY_TAP_RULES = [
 
 function escapePowerShellSingleQuoted(value) {
   return String(value || '').replace(/'/g, "''")
+}
+
+function cidrToFirewallSubnet(subnetCidr) {
+  const match = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})\/(\d|[12]\d|3[0-2])$/.exec(String(subnetCidr || '').trim())
+  if (!match) throw new Error('WEL 房间子网格式不正确')
+
+  const octets = match.slice(1, 5).map(Number)
+  if (octets.some((octet) => octet > 255)) throw new Error('WEL 房间子网格式不正确')
+
+  const prefixLength = Number(match[5])
+  const mask = Array.from({ length: 4 }, (_, index) => {
+    const remainingBits = Math.max(0, Math.min(8, prefixLength - index * 8))
+    return remainingBits === 0 ? 0 : 256 - (2 ** (8 - remainingBits))
+  })
+  const network = octets.map((octet, index) => octet & mask[index])
+  return `${network.join('.')}/${mask.join('.')}`
 }
 
 function buildProgramInboundFirewallScript(ruleName, description, programPath, legacyRuleNames = []) {
@@ -72,26 +90,37 @@ function buildWe8FirewallScript(programPath) {
   )
 }
 
-function buildGameDiscoveryFirewallScript(subnetCidr) {
-  const subnet = String(subnetCidr || '').trim()
-  if (!/^\d{1,3}(?:\.\d{1,3}){3}\/(?:[0-9]|[12]\d|3[0-2])$/.test(subnet)) throw new Error('WEL 房间子网格式不正确')
+function buildRoomUdpFirewallScript(subnetCidr) {
+  const subnet = cidrToFirewallSubnet(subnetCidr)
   return `
 $ErrorActionPreference = 'Stop'
 $policy = New-Object -ComObject HNetCfg.FwPolicy2
-try { $policy.Rules.Remove('${GAME_DISCOVERY_INBOUND_RULE}') } catch {}
+$ruleNames = @(
+  '${LEGACY_GAME_DISCOVERY_RULE}',
+  '${ROOM_UDP_INBOUND_RULE}',
+  '${ROOM_UDP_OUTBOUND_RULE}'
+)
+foreach ($ruleName in $ruleNames) {
+  try { $policy.Rules.Remove($ruleName) } catch {}
+}
 
-$rule = New-Object -ComObject HNetCfg.FWRule
-$rule.Name = '${GAME_DISCOVERY_INBOUND_RULE}'
-$rule.Description = 'Allow WEL room discovery only from the virtual room subnet.'
-$rule.Protocol = 17
-$rule.LocalPorts = '5739'
-$rule.RemoteAddresses = '${escapePowerShellSingleQuoted(subnet)}'
-$rule.Direction = 1
-$rule.Action = 1
-$rule.Enabled = $true
-$rule.Profiles = 2147483647
-$rule.InterfaceTypes = 'All'
-$policy.Rules.Add($rule)
+$ruleDefinitions = @(
+  @{ Name = '${ROOM_UDP_INBOUND_RULE}'; Direction = 1; Description = 'Allow inbound UDP traffic from the active WEL virtual room subnet.' },
+  @{ Name = '${ROOM_UDP_OUTBOUND_RULE}'; Direction = 2; Description = 'Allow outbound UDP traffic to the active WEL virtual room subnet.' }
+)
+foreach ($definition in $ruleDefinitions) {
+  $rule = New-Object -ComObject HNetCfg.FWRule
+  $rule.Name = $definition.Name
+  $rule.Description = $definition.Description
+  $rule.Protocol = 17
+  $rule.RemoteAddresses = '${escapePowerShellSingleQuoted(subnet)}'
+  $rule.Direction = $definition.Direction
+  $rule.Action = 1
+  $rule.Enabled = $true
+  $rule.Profiles = 2147483647
+  $rule.InterfaceTypes = 'All'
+  $policy.Rules.Add($rule)
+}
 `
 }
 
@@ -107,22 +136,25 @@ async function ensureWe8Firewall(programPath) {
   return true
 }
 
-async function ensureGameDiscoveryFirewall(subnetCidr) {
+async function ensureRoomUdpFirewall(subnetCidr) {
   if (process.platform !== 'win32') return false
-  await runPowerShell(buildGameDiscoveryFirewallScript(subnetCidr), 12000)
+  await runPowerShell(buildRoomUdpFirewallScript(subnetCidr), 12000)
   return true
 }
 
 module.exports = {
   LEGACY_WE8_RULES,
   EDGE_INBOUND_RULE,
-  GAME_DISCOVERY_INBOUND_RULE,
+  LEGACY_GAME_DISCOVERY_RULE,
+  ROOM_UDP_INBOUND_RULE,
+  ROOM_UDP_OUTBOUND_RULE,
   WE8_INBOUND_RULE,
   buildEdgeFirewallScript,
-  buildGameDiscoveryFirewallScript,
+  buildRoomUdpFirewallScript,
   buildWe8FirewallScript,
   buildProgramInboundFirewallScript,
+  cidrToFirewallSubnet,
   ensureEdgeFirewall,
-  ensureGameDiscoveryFirewall,
+  ensureRoomUdpFirewall,
   ensureWe8Firewall,
 }

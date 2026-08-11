@@ -1,7 +1,7 @@
 {
   "name": "wel-openvpn-client",
   "private": true,
-  "version": "0.1.87",
+  "version": "0.1.88",
   "packageManager": "pnpm@11.11.0",
   "type": "module",
   "main": "electron/main.cjs",
@@ -78,7 +78,7 @@
       "perMachine": true,
       "allowElevation": true,
       "allowToChangeInstallationDirectory": true,
-      "shortcutName": "WEL职业联盟对战平台 v0.1.87",
+      "shortcutName": "WEL职业联盟对战平台 v0.1.88",
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true
     }

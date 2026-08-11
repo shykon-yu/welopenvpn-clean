@@ -3,7 +3,7 @@ const os = require('node:os')
 const path = require('node:path')
 const { spawn } = require('node:child_process')
 const { formatProcessExitCode, inspectVpnNetwork, runPowerShell, runProcess, waitForVpnNetwork } = require('./network.cjs')
-const { ensureEdgeFirewall, ensureGameDiscoveryFirewall } = require('./firewall.cjs')
+const { ensureEdgeFirewall, ensureRoomUdpFirewall } = require('./firewall.cjs')
 
 const DEFAULT_HOST = '8.133.189.9'
 const DEFAULT_PORT = 22222
@@ -681,7 +681,7 @@ async function connect({ host, port, roomID, username, subnetCidr, virtualIP, co
     // Non-elevated clients keep the normal Windows firewall confirmation flow.
   }
   try {
-    await ensureGameDiscoveryFirewall(subnetCidr)
+    await ensureRoomUdpFirewall(subnetCidr)
   } catch {
     // The n2n connection remains usable if a restricted Windows policy blocks rule creation.
   }
