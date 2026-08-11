@@ -5,6 +5,7 @@ const { spawn } = require('node:child_process')
 const { formatProcessExitCode, inspectVpnNetwork, runPowerShell, runProcess, waitForVpnNetwork } = require('./network.cjs')
 const { ensureEdgeFirewall, ensureRoomUdpFirewall } = require('./firewall.cjs')
 const { ensureBroadcastRoute, removeBroadcastRoute } = require('./broadcast-route.cjs')
+const { startGameBroadcastRedirect, stopGameBroadcastRedirect } = require('./game-broadcast.cjs')
 
 const DEFAULT_HOST = '8.133.189.9'
 const DEFAULT_PORT = 22222
@@ -464,6 +465,7 @@ async function stopConnection() {
   const current = connection
   connection = null
   try {
+    try { await stopGameBroadcastRedirect(current.broadcastProcess) } catch {}
     try { current.process.kill() } catch {}
     const exited = await waitForProcessExit(current.process, STOP_TIMEOUT_MS)
     if (!exited) try { current.process.kill('SIGKILL') } catch {}
@@ -637,11 +639,19 @@ async function connectAttempt({ executable, host, port, roomID, username, subnet
     else if (connection?.process === child) {
       const current = connection
       connection = null
-      removeBroadcastRoute(current.broadcastRoute).catch(() => {})
+      stopGameBroadcastRedirect(current.broadcastProcess)
+        .then(() => removeBroadcastRoute(current.broadcastRoute))
+        .catch(() => {})
       removeFiles(current.temporaryFiles)
     }
   })
-  connection = { process: child, temporaryFiles: [files.configPath], logPath: files.logPath, broadcastRoute: null }
+  connection = {
+    process: child,
+    temporaryFiles: [files.configPath],
+    logPath: files.logPath,
+    broadcastRoute: null,
+    broadcastProcess: null,
+  }
 
   try {
     const startedAt = Date.now()
@@ -661,6 +671,17 @@ async function connectAttempt({ executable, host, port, roomID, username, subnet
             throw new Error(failed || 'n2n 进程在配置游戏广播路由时退出')
           }
           connection.broadcastRoute = broadcastRoute
+          const broadcastProcess = await startGameBroadcastRedirect(inspectedNetwork, subnetCidr, files.logPath)
+          if (failed || child.exitCode !== null || connection?.process !== child) {
+            await stopGameBroadcastRedirect(broadcastProcess)
+            throw new Error(failed || 'n2n 进程在配置游戏广播组件时退出')
+          }
+          connection.broadcastProcess = broadcastProcess
+          broadcastProcess?.process.once('close', () => {
+            if (!broadcastProcess.stopping && connection?.broadcastProcess === broadcastProcess) {
+              try { connection.process.kill() } catch {}
+            }
+          })
           initialized = true
           return inspectedNetwork
         }
