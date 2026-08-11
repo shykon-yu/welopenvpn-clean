@@ -7,6 +7,7 @@
 #include <commctrl.h>
 #include <iphlpapi.h>
 #include <shlobj.h>
+#include <shellapi.h>
 #include <tlhelp32.h>
 #include <stdio.h>
 #include <stdint.h>
