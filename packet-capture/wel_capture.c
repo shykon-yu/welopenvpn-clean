@@ -94,24 +94,35 @@ static int command_exists(const wchar_t *name) {
     return SearchPathW(NULL, name, NULL, ARRAYSIZE(path), path, NULL) > 0;
 }
 
+static int locate_command(const wchar_t *name, wchar_t *path, DWORD path_count) {
+    return SearchPathW(NULL, name, NULL, path_count, path, NULL) > 0;
+}
+
 static DWORD run_command(const wchar_t *command_line, const wchar_t *working_directory, const wchar_t *output_file, DWORD timeout_ms) {
     STARTUPINFOW startup;
     PROCESS_INFORMATION process;
+    SECURITY_ATTRIBUTES security;
     HANDLE output;
+    HANDLE input;
     wchar_t *mutable_command;
     DWORD result = ERROR_GEN_FAILURE;
     size_t length = wcslen(command_line);
 
-    output = CreateFileW(output_file, GENERIC_WRITE, FILE_SHARE_READ, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    ZeroMemory(&security, sizeof(security));
+    security.nLength = sizeof(security);
+    security.bInheritHandle = TRUE;
+    output = CreateFileW(output_file, GENERIC_WRITE, FILE_SHARE_READ, &security, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
     if (output == INVALID_HANDLE_VALUE) return GetLastError();
+    input = CreateFileW(L"NUL", GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, &security, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (input == INVALID_HANDLE_VALUE) { CloseHandle(output); return GetLastError(); }
     mutable_command = (wchar_t *)HeapAlloc(GetProcessHeap(), 0, (length + 1) * sizeof(wchar_t));
-    if (mutable_command == NULL) { CloseHandle(output); return ERROR_NOT_ENOUGH_MEMORY; }
+    if (mutable_command == NULL) { CloseHandle(input); CloseHandle(output); return ERROR_NOT_ENOUGH_MEMORY; }
     wcscpy_s(mutable_command, length + 1, command_line);
     ZeroMemory(&startup, sizeof(startup));
     ZeroMemory(&process, sizeof(process));
     startup.cb = sizeof(startup);
     startup.dwFlags = STARTF_USESTDHANDLES;
-    startup.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
+    startup.hStdInput = input;
     startup.hStdOutput = output;
     startup.hStdError = output;
     if (CreateProcessW(NULL, mutable_command, NULL, NULL, TRUE, CREATE_NO_WINDOW, NULL, working_directory, &startup, &process)) {
@@ -125,6 +136,7 @@ static DWORD run_command(const wchar_t *command_line, const wchar_t *working_dir
         CloseHandle(process.hProcess);
     } else result = GetLastError();
     HeapFree(GetProcessHeap(), 0, mutable_command);
+    CloseHandle(input);
     CloseHandle(output);
     return result;
 }
@@ -456,17 +468,31 @@ static int create_archive(void) {
 static int start_packet_capture(void) {
     wchar_t log[MAX_CAPTURE_PATH];
     wchar_t command[MAX_CAPTURE_PATH + 256];
-    make_path(log, ARRAYSIZE(log), g_session.work_directory, L"capture-start.txt");
+    wchar_t pktmon_path[MAX_PATH];
+    DWORD result;
     make_path(g_session.etl_file, ARRAYSIZE(g_session.etl_file), g_session.work_directory, L"packets.etl");
-    if (command_exists(L"pktmon.exe")) {
-        run_command(L"pktmon.exe stop", g_session.work_directory, log, 10000);
-        run_command(L"pktmon.exe filter remove", g_session.work_directory, log, 10000);
-        _snwprintf_s(command, ARRAYSIZE(command), _TRUNCATE, L"pktmon.exe start --capture --pkt-size 0 --file-name \"%ls\"", g_session.etl_file);
-        if (run_command(command, g_session.work_directory, log, 30000) == 0) { g_session.mode = CAPTURE_PKTMON; return 1; }
+    DeleteFileW(g_session.etl_file);
+    make_path(log, ARRAYSIZE(log), g_session.work_directory, L"capture-start.txt");
+    if (locate_command(L"pktmon.exe", pktmon_path, ARRAYSIZE(pktmon_path))) {
+        _snwprintf_s(command, ARRAYSIZE(command), _TRUNCATE, L"\"%ls\" stop", pktmon_path);
+        run_command(command, g_session.work_directory, log, 10000);
+        _snwprintf_s(command, ARRAYSIZE(command), _TRUNCATE, L"\"%ls\" filter remove", pktmon_path);
+        run_command(command, g_session.work_directory, log, 10000);
+        _snwprintf_s(command, ARRAYSIZE(command), _TRUNCATE, L"\"%ls\" start --capture --pkt-size 0 --file-name \"%ls\"", pktmon_path, g_session.etl_file);
+        result = run_command(command, g_session.work_directory, log, 30000);
+        if (result == 0) { g_session.mode = CAPTURE_PKTMON; return 1; }
+        _snwprintf_s(command, ARRAYSIZE(command), _TRUNCATE, L"\"%ls\" start --capture --file-name \"%ls\"", pktmon_path, g_session.etl_file);
+        result = run_command(command, g_session.work_directory, log, 30000);
+        if (result == 0) { g_session.mode = CAPTURE_PKTMON; return 1; }
+        post_status(L"pktmon start failed (code %lu); trying Windows trace fallback.", (unsigned long)result);
     }
-    _snwprintf_s(command, ARRAYSIZE(command), _TRUNCATE,
-        L"netsh.exe trace start capture=yes persistent=no overwrite=yes maxsize=512 correlation=yes tracefile=\"%ls\"", g_session.etl_file);
-    if (run_command(command, g_session.work_directory, log, 30000) == 0) { g_session.mode = CAPTURE_NETSH; return 1; }
+    if (command_exists(L"netsh.exe")) {
+        run_command(L"netsh.exe trace stop", g_session.work_directory, log, 10000);
+        _snwprintf_s(command, ARRAYSIZE(command), _TRUNCATE,
+            L"netsh.exe trace start capture=yes persistent=no overwrite=yes maxsize=512 correlation=yes tracefile=\"%ls\"", g_session.etl_file);
+        if (run_command(command, g_session.work_directory, log, 30000) == 0) { g_session.mode = CAPTURE_NETSH; return 1; }
+    }
+    post_status(L"No usable Windows packet capture session could be started.");
     return 0;
 }
 
