@@ -1,0 +1,10 @@
+{
+  "name": "wel-plan-b-relay",
+  "private": true,
+  "version": "0.0.1",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.cjs",
+    "test": "node --test relay.test.cjs"
+  }
+}
