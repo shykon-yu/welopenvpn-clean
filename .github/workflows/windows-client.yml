@@ -74,6 +74,21 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Windows firewall authorization helper build failed' }
           & "frontend/resources/welhelper/welfirewall.exe" --self-test
           if ($LASTEXITCODE -ne 0) { throw 'Windows firewall authorization helper self-test failed' }
+      - name: Compile isolated Plan B runtime
+        shell: pwsh
+        working-directory: ${{ github.workspace }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $output = '.plan-b-build'
+          New-Item $output -ItemType Directory -Force | Out-Null
+          & cl.exe /nologo /W4 /O2 /MT /D_CRT_SECURE_NO_WARNINGS /D_WIN32_WINNT=0x0601 `
+            /LD plan-b/client/wel_relay_hook.c /Fe:"$output/welrelayhook.dll" /link Ws2_32.lib Psapi.lib
+          if ($LASTEXITCODE -ne 0) { throw 'Plan B relay hook build failed' }
+          & cl.exe /nologo /W4 /O2 /MT /D_CRT_SECURE_NO_WARNINGS /D_WIN32_WINNT=0x0601 `
+            plan-b/client/wel_relay_launcher.c /Fe:"$output/welrelaygame.exe"
+          if ($LASTEXITCODE -ne 0) { throw 'Plan B relay launcher build failed' }
+          & "$output/welrelaygame.exe" --self-test
+          if ($LASTEXITCODE -ne 0) { throw 'Plan B relay launcher self-test failed' }
       - uses: actions/setup-node@v4
         with:
           node-version: 18
@@ -84,8 +99,8 @@ jobs:
         working-directory: frontend
         run: npm run test:electron
       - name: Test Plan B relay protocol
-        working-directory: plan-b/relay
-        run: node --test relay.test.cjs
+        working-directory: plan-b
+        run: node --test relay/relay.test.cjs client/bridge.test.cjs
       - name: Check Windows PowerShell scripts
         shell: pwsh
         working-directory: frontend
