@@ -83,6 +83,9 @@ jobs:
       - name: Test Electron helpers
         working-directory: frontend
         run: npm run test:electron
+      - name: Test Plan B relay protocol
+        working-directory: plan-b/relay
+        run: node --test relay.test.cjs
       - name: Check Windows PowerShell scripts
         shell: pwsh
         working-directory: frontend
