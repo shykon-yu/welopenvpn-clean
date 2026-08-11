@@ -1,4 +1,7 @@
-const { runElevatedPowerShell, runPowerShell } = require('./network.cjs')
+const fs = require('node:fs')
+const os = require('node:os')
+const path = require('node:path')
+const { runPowerShell, runProcess } = require('./network.cjs')
 
 const EDGE_INBOUND_RULE = 'WEL n2n edge inbound'
 const WE8_INBOUND_RULE = 'WEL WE8 inbound'
@@ -23,6 +26,43 @@ const LEGACY_TAP_RULES = [
   'WEL TAP UDP Inbound',
   'WEL TAP UDP Outbound',
 ]
+
+function isWindows7(release = os.release()) {
+  return /^6\.1(?:\.|$)/.test(String(release || ''))
+}
+
+function firewallHelperCandidates() {
+  return [
+    path.join(process.resourcesPath || '', 'welhelper', 'welfirewall.exe'),
+    path.join(__dirname, '..', 'resources', 'welhelper', 'welfirewall.exe'),
+  ].filter(Boolean)
+}
+
+function locateFirewallHelper() {
+  return firewallHelperCandidates().find((candidate) => fs.existsSync(candidate)) || null
+}
+
+function firewallHelperExitReason(code) {
+  if (Number(code) === 10) return '用户取消了 Windows 防火墙授权'
+  if (Number(code) === 11) return 'Windows 无法启动防火墙授权程序'
+  if (Number(code) === 12) return 'Windows 防火墙规则写入失败'
+  return `Windows 防火墙授权程序退出（代码 ${code ?? '未知'}）`
+}
+
+async function ensureWin7RoomFirewall(subnetCidr, edgePath) {
+  if (process.platform !== 'win32') return false
+  const helper = locateFirewallHelper()
+  if (!helper) throw new Error('未找到 Windows 7 防火墙授权组件，请安装最新完整客户端')
+  const subnet = cidrToFirewallSubnet(subnetCidr)
+  try {
+    await runProcess(helper, ['--subnet', subnet, '--edge', edgePath], 45000)
+  } catch (error) {
+    const match = /退出代码\s+(-?\d+)/.exec(String(error?.message || ''))
+    if (match) throw new Error(firewallHelperExitReason(Number(match[1])))
+    throw new Error(`Windows 防火墙授权失败：${error.message}`)
+  }
+  return true
+}
 
 function escapePowerShellSingleQuoted(value) {
   return String(value || '').replace(/'/g, "''")
@@ -69,7 +109,6 @@ $rule.Direction = 1
 $rule.Action = 1
 $rule.Enabled = $true
 $rule.Profiles = 2147483647
-$rule.InterfaceTypes = 'All'
 $policy.Rules.Add($rule)
 `
 }
@@ -123,7 +162,6 @@ foreach ($definition in $ruleDefinitions) {
   $rule.Action = 1
   $rule.Enabled = $true
   $rule.Profiles = 2147483647
-  $rule.InterfaceTypes = 'All'
   $policy.Rules.Add($rule)
 }
 `
@@ -146,62 +184,14 @@ foreach ($ruleName in $ruleNames) {
 `
 }
 
-function buildNetshProgramInboundFirewallScript(ruleName, description, programPath, legacyRuleNames = []) {
-  const normalizedPath = String(programPath || '').trim()
-  if (!normalizedPath) throw new Error('防火墙程序路径为空')
-  const ruleNames = [ruleName, ...legacyRuleNames]
-  const powershellRuleNames = ruleNames.map((name) => `'${escapePowerShellSingleQuoted(name)}'`).join(', ')
-  return `
-$ErrorActionPreference = 'Stop'
-$netsh = Join-Path $env:SystemRoot 'System32\\netsh.exe'
-$ruleNames = @(${powershellRuleNames})
-foreach ($existingRuleName in $ruleNames) {
-  & $netsh advfirewall firewall delete rule "name=$existingRuleName" | Out-Null
-}
-& $netsh advfirewall firewall add rule "name=${escapePowerShellSingleQuoted(ruleName)}" dir=in action=allow "program=${escapePowerShellSingleQuoted(normalizedPath)}" enable=yes profile=any "description=${escapePowerShellSingleQuoted(description)}" | Out-Null
-if ($LASTEXITCODE -ne 0) { throw 'netsh failed to create the WEL program firewall rule' }
-`
-}
-
-function buildNetshRoomFirewallScript(subnetCidr) {
-  const subnet = cidrToFirewallSubnet(subnetCidr)
-  return `
-$ErrorActionPreference = 'Stop'
-$netsh = Join-Path $env:SystemRoot 'System32\\netsh.exe'
-$ruleNames = @(
-  '${LEGACY_GAME_DISCOVERY_RULE}',
-  '${ROOM_UDP_INBOUND_RULE}',
-  '${ROOM_UDP_OUTBOUND_RULE}',
-  '${ROOM_ICMP_INBOUND_RULE}',
-  '${ROOM_ICMP_OUTBOUND_RULE}'
-)
-foreach ($ruleName in $ruleNames) {
-  & $netsh advfirewall firewall delete rule "name=$ruleName" | Out-Null
-}
-& $netsh advfirewall firewall add rule "name=${ROOM_UDP_INBOUND_RULE}" dir=in action=allow protocol=udp "remoteip=${escapePowerShellSingleQuoted(subnet)}" enable=yes profile=any | Out-Null
-if ($LASTEXITCODE -ne 0) { throw 'netsh failed to create the inbound WEL UDP rule' }
-& $netsh advfirewall firewall add rule "name=${ROOM_UDP_OUTBOUND_RULE}" dir=out action=allow protocol=udp "remoteip=${escapePowerShellSingleQuoted(subnet)}" enable=yes profile=any | Out-Null
-if ($LASTEXITCODE -ne 0) { throw 'netsh failed to create the outbound WEL UDP rule' }
-& $netsh advfirewall firewall add rule "name=${ROOM_ICMP_INBOUND_RULE}" dir=in action=allow protocol=icmpv4:any,any "remoteip=${escapePowerShellSingleQuoted(subnet)}" enable=yes profile=any | Out-Null
-if ($LASTEXITCODE -ne 0) { throw 'netsh failed to create the inbound WEL ICMPv4 rule' }
-& $netsh advfirewall firewall add rule "name=${ROOM_ICMP_OUTBOUND_RULE}" dir=out action=allow protocol=icmpv4:any,any "remoteip=${escapePowerShellSingleQuoted(subnet)}" enable=yes profile=any | Out-Null
-if ($LASTEXITCODE -ne 0) { throw 'netsh failed to create the outbound WEL ICMPv4 rule' }
-`
-}
-
 async function firewallRulesExist(ruleNames) {
   const output = await runPowerShell(buildFirewallRuleCheckScript(ruleNames), 12000)
   const found = new Set(String(output || '').split(/\r?\n/).map((line) => line.trim()).filter(Boolean))
   return ruleNames.every((name) => found.has(name))
 }
 
-async function ensureFirewallRules(primaryScript, fallbackScript, ruleNames) {
-  try {
-    await runPowerShell(primaryScript, 12000)
-    if (await firewallRulesExist(ruleNames)) return true
-  } catch {}
-
-  await runElevatedPowerShell(fallbackScript, 30000)
+async function ensureFirewallRules(primaryScript, ruleNames) {
+  await runPowerShell(primaryScript, 12000)
   if (!await firewallRulesExist(ruleNames)) {
     throw new Error(`Windows 防火墙规则创建失败：${ruleNames.join('、')}`)
   }
@@ -212,7 +202,6 @@ async function ensureEdgeFirewall(programPath) {
   if (process.platform !== 'win32') return false
   return ensureFirewallRules(
     buildEdgeFirewallScript(programPath),
-    buildNetshProgramInboundFirewallScript(EDGE_INBOUND_RULE, 'Allow WEL n2n edge inbound traffic.', programPath, LEGACY_TAP_RULES),
     [EDGE_INBOUND_RULE],
   )
 }
@@ -221,7 +210,6 @@ async function ensureWe8Firewall(programPath) {
   if (process.platform !== 'win32') return false
   return ensureFirewallRules(
     buildWe8FirewallScript(programPath),
-    buildNetshProgramInboundFirewallScript(WE8_INBOUND_RULE, 'Allow WEL WE8 inbound discovery and game traffic.', programPath, LEGACY_WE8_RULES),
     [WE8_INBOUND_RULE],
   )
 }
@@ -229,7 +217,7 @@ async function ensureWe8Firewall(programPath) {
 async function ensureRoomUdpFirewall(subnetCidr) {
   if (process.platform !== 'win32') return false
   const requiredRules = [ROOM_UDP_INBOUND_RULE, ROOM_UDP_OUTBOUND_RULE, ROOM_ICMP_INBOUND_RULE, ROOM_ICMP_OUTBOUND_RULE]
-  return ensureFirewallRules(buildRoomUdpFirewallScript(subnetCidr), buildNetshRoomFirewallScript(subnetCidr), requiredRules)
+  return ensureFirewallRules(buildRoomUdpFirewallScript(subnetCidr), requiredRules)
 }
 
 module.exports = {
@@ -243,13 +231,16 @@ module.exports = {
   WE8_INBOUND_RULE,
   buildEdgeFirewallScript,
   buildFirewallRuleCheckScript,
-  buildNetshProgramInboundFirewallScript,
-  buildNetshRoomFirewallScript,
   buildRoomUdpFirewallScript,
   buildWe8FirewallScript,
   buildProgramInboundFirewallScript,
   cidrToFirewallSubnet,
   ensureEdgeFirewall,
   ensureRoomUdpFirewall,
+  ensureWin7RoomFirewall,
   ensureWe8Firewall,
+  firewallHelperCandidates,
+  firewallHelperExitReason,
+  isWindows7,
+  locateFirewallHelper,
 }

@@ -1,10 +1,10 @@
 const test = require('node:test')
 const assert = require('node:assert/strict')
+const fs = require('node:fs')
+const path = require('node:path')
 const {
   buildEdgeFirewallScript,
   buildFirewallRuleCheckScript,
-  buildNetshProgramInboundFirewallScript,
-  buildNetshRoomFirewallScript,
   buildRoomUdpFirewallScript,
   buildWe8FirewallScript,
   cidrToFirewallSubnet,
@@ -16,6 +16,9 @@ const {
   ROOM_UDP_INBOUND_RULE,
   ROOM_UDP_OUTBOUND_RULE,
   WE8_INBOUND_RULE,
+  firewallHelperCandidates,
+  firewallHelperExitReason,
+  isWindows7,
 } = require('./firewall.cjs')
 
 test('allows all inbound traffic for the selected WE8 executable', () => {
@@ -63,17 +66,21 @@ test('rejects an empty firewall program path', () => {
   assert.throws(() => buildWe8FirewallScript(''), /防火墙程序路径为空/)
 })
 
-test('falls back to elevated netsh rules that work on Windows 7', () => {
-  const roomScript = buildNetshRoomFirewallScript('10.222.1.0/24')
-  assert.match(roomScript, /netsh\.exe/)
-  assert.match(roomScript, /protocol=udp/)
-  assert.match(roomScript, /protocol=icmpv4:any,any/)
-  assert.match(roomScript, /remoteip=10\.222\.1\.0\/255\.255\.255\.0/)
-  assert.match(roomScript, /profile=any/)
+test('uses a dedicated native firewall authorization helper on Windows 7', () => {
+  assert.equal(isWindows7('6.1.7601'), true)
+  assert.equal(isWindows7('10.0.19045'), false)
+  assert.ok(firewallHelperCandidates().some((candidate) => candidate.endsWith('welfirewall.exe')))
+  assert.match(firewallHelperExitReason(10), /用户取消/)
+  assert.match(firewallHelperExitReason(12), /规则写入失败/)
+})
 
-  const programScript = buildNetshProgramInboundFirewallScript('WEL test', 'Allow WEL test.', 'C:\\Games\\WE8.exe')
-  assert.match(programScript, /program=C:\\Games\\WE8\.exe/)
-  assert.match(programScript, /dir=in/)
+test('uses ShellExecute UAC and netsh inside the native Windows 7 helper', () => {
+  const source = fs.readFileSync(path.join(__dirname, '..', '..', 'native', 'wel-firewall', 'wel_firewall.c'), 'utf8')
+  assert.match(source, /ShellExecuteExW/)
+  assert.match(source, /lpVerb = L"runas"/)
+  assert.match(source, /netsh\.exe/)
+  assert.match(source, /icmpv4:any,any/)
+  assert.match(source, /WEL room UDP inbound/)
 })
 
 test('verifies that Windows actually retained every required firewall rule', () => {

@@ -69,6 +69,11 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'welgame.exe build failed' }
           & "$output/welgame.exe" --self-test
           if ($LASTEXITCODE -ne 0) { throw 'WE8 socket launcher self-test failed' }
+          & cl.exe /nologo /W4 /O2 /MT /D_CRT_SECURE_NO_WARNINGS /D_WIN32_WINNT=0x0601 `
+            native/wel-firewall/wel_firewall.c /Fe:"frontend/resources/welhelper/welfirewall.exe" /link Shell32.lib /SUBSYSTEM:WINDOWS
+          if ($LASTEXITCODE -ne 0) { throw 'Windows firewall authorization helper build failed' }
+          & "frontend/resources/welhelper/welfirewall.exe" --self-test
+          if ($LASTEXITCODE -ne 0) { throw 'Windows firewall authorization helper self-test failed' }
       - uses: actions/setup-node@v4
         with:
           node-version: 18
@@ -105,6 +110,7 @@ jobs:
             'resources/welhelper/edge.exe',
             'resources/welhelper/n2n-LICENSE.txt',
             'resources/welhelper/n2n-source-notice.txt',
+            'resources/welhelper/welfirewall.exe',
             'resources/welhelper/game-runtime/welgame.exe',
             'resources/welhelper/game-runtime/welhook.dll',
             'resources/openvpn/bin/tapctl.exe',
