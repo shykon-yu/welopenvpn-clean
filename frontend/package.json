@@ -1,7 +1,7 @@
 {
-  "name": "wel-openvpn-client",
+  "name": "wrh-openvpn-client",
   "private": true,
-  "version": "0.1.99",
+  "version": "0.0.1",
   "packageManager": "pnpm@11.11.0",
   "type": "module",
   "main": "electron/main.cjs",
@@ -19,9 +19,9 @@
     "vue": "^3.5.13"
   },
   "build": {
-    "appId": "com.wel.openvpn.client",
-    "productName": "WEL职业联盟对战平台",
-    "artifactName": "WEL职业联盟对战平台-${version}-安装包.${ext}",
+    "appId": "com.wrh.openvpn.client",
+    "productName": "WRH对战平台",
+    "artifactName": "WRH对战平台-${version}-安装包.${ext}",
     "directories": {
       "output": "release"
     },
@@ -56,7 +56,7 @@
       },
       {
         "from": "build/icon.ico",
-        "to": "welhelper/wel.ico"
+        "to": "welhelper/wrh.ico"
       }
     ],
     "win": {
@@ -69,7 +69,7 @@
         }
       ],
       "icon": "build/icon.ico",
-      "executableName": "WEL职业联盟对战平台",
+      "executableName": "WRH对战平台",
       "requestedExecutionLevel": "requireAdministrator"
     },
     "nsis": {
@@ -78,7 +78,7 @@
       "perMachine": true,
       "allowElevation": true,
       "allowToChangeInstallationDirectory": true,
-      "shortcutName": "WEL职业联盟对战平台 v0.1.99",
+      "shortcutName": "WRH对战平台 v0.0.1",
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true
     }
@@ -90,6 +90,6 @@
     "electron-builder": "24.13.3",
     "typescript": "~5.6.3",
     "vite": "^6.0.5",
-    "vue-tsc": "^2.2.0"
+    "vue-tsc": "~2.2.0"
   }
 }

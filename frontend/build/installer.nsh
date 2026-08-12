@@ -10,7 +10,7 @@
   IfFileExists "$INSTDIR\resources\welhelper\weltap.exe" runtime_ready
 
 runtime_missing:
-  MessageBox MB_ICONSTOP|MB_OK "WEL 联机运行文件不完整，请重新下载安装包。"
+  MessageBox MB_ICONSTOP|MB_OK "WRH 联机运行文件不完整，请重新下载安装包。"
   Abort
 
 runtime_ready:

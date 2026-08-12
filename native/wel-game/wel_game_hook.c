@@ -10,12 +10,7 @@
 #include <string.h>
 
 typedef int (WSAAPI *wel_bind_fn)(SOCKET, const struct sockaddr *, int);
-typedef int (WSAAPI *wel_connect_fn)(SOCKET, const struct sockaddr *, int);
-typedef int (WSAAPI *wel_send_fn)(SOCKET, const char *, int, int);
 typedef int (WSAAPI *wel_sendto_fn)(SOCKET, const char *, int, int, const struct sockaddr *, int);
-typedef int (WSAAPI *wel_setsockopt_fn)(SOCKET, int, int, const char *, int);
-typedef int (WSAAPI *wel_wsaconnect_fn)(SOCKET, const struct sockaddr *, int, LPWSABUF, LPWSABUF, LPQOS, LPQOS);
-typedef int (WSAAPI *wel_wsasend_fn)(SOCKET, LPWSABUF, DWORD, LPDWORD, DWORD, LPWSAOVERLAPPED, LPWSAOVERLAPPED_COMPLETION_ROUTINE);
 typedef int (WSAAPI *wel_wsasendto_fn)(
     SOCKET,
     LPWSABUF,
@@ -34,12 +29,7 @@ static IN_ADDR g_tap_address;
 static IN_ADDR g_broadcast_address;
 static DWORD g_interface_index = 0;
 static wel_bind_fn g_real_bind = NULL;
-static wel_connect_fn g_real_connect = NULL;
-static wel_send_fn g_real_send = NULL;
 static wel_sendto_fn g_real_sendto = NULL;
-static wel_setsockopt_fn g_real_setsockopt = NULL;
-static wel_wsaconnect_fn g_real_wsaconnect = NULL;
-static wel_wsasend_fn g_real_wsasend = NULL;
 static wel_wsasendto_fn g_real_wsasendto = NULL;
 
 static int read_ipv4_environment(const char *name, IN_ADDR *address) {
@@ -100,25 +90,10 @@ static void ensure_udp_bound_to_tap(SOCKET socket_handle) {
     if (!is_udp_socket(socket_handle)) return;
     ZeroMemory(&local_address, sizeof(local_address));
     if (getsockname(socket_handle, (struct sockaddr *)&local_address, &length) != 0) return;
-    if (local_address.sin_family == AF_INET && local_address.sin_addr.S_un.S_addr == htonl(INADDR_LOOPBACK)) return;
     select_tap_interface(socket_handle);
     if (local_address.sin_family == AF_INET && local_address.sin_addr.S_un.S_addr == INADDR_ANY) {
         bind_udp_to_tap(socket_handle, local_address.sin_port);
     }
-}
-
-static int is_non_loopback_ipv4_destination(const struct sockaddr *destination, int destination_length) {
-    const struct sockaddr_in *ipv4;
-    if (destination == NULL || destination_length < (int)sizeof(struct sockaddr_in) || destination->sa_family != AF_INET) return 0;
-    ipv4 = (const struct sockaddr_in *)destination;
-    return ipv4->sin_addr.S_un.S_addr != htonl(INADDR_LOOPBACK) &&
-        ipv4->sin_addr.S_un.S_addr != INADDR_ANY;
-}
-
-static void prepare_game_udp_socket(SOCKET socket_handle) {
-    if (!is_udp_socket(socket_handle)) return;
-    ensure_udp_bound_to_tap(socket_handle);
-    select_tap_interface(socket_handle);
 }
 
 static int is_discovery_destination(const struct sockaddr *destination, int destination_length) {
@@ -160,62 +135,6 @@ static int WSAAPI wel_bind(SOCKET socket_handle, const struct sockaddr *address,
     return g_real_bind(socket_handle, (const struct sockaddr *)&tap_address, sizeof(tap_address));
 }
 
-static int WSAAPI wel_connect(SOCKET socket_handle, const struct sockaddr *destination, int destination_length) {
-    if (g_real_connect == NULL) {
-        WSASetLastError(WSAEINVAL);
-        return SOCKET_ERROR;
-    }
-    if (is_udp_socket(socket_handle) && is_non_loopback_ipv4_destination(destination, destination_length)) {
-        prepare_game_udp_socket(socket_handle);
-    }
-    return g_real_connect(socket_handle, destination, destination_length);
-}
-
-static int WSAAPI wel_wsaconnect(SOCKET socket_handle, const struct sockaddr *destination, int destination_length,
-    LPWSABUF caller_data, LPWSABUF callee_data, LPQOS caller_qos, LPQOS callee_qos) {
-    if (g_real_wsaconnect == NULL) {
-        WSASetLastError(WSAEINVAL);
-        return SOCKET_ERROR;
-    }
-    if (is_udp_socket(socket_handle) && is_non_loopback_ipv4_destination(destination, destination_length)) {
-        prepare_game_udp_socket(socket_handle);
-    }
-    return g_real_wsaconnect(socket_handle, destination, destination_length, caller_data, callee_data, caller_qos, callee_qos);
-}
-
-static int WSAAPI wel_setsockopt(SOCKET socket_handle, int level, int option_name, const char *option_value, int option_length) {
-    DWORD network_index;
-    if (g_real_setsockopt == NULL) {
-        WSASetLastError(WSAEINVAL);
-        return SOCKET_ERROR;
-    }
-    if (is_udp_socket(socket_handle) && level == IPPROTO_IP && option_name == IP_UNICAST_IF &&
-        g_interface_index != 0 && option_value != NULL && option_length >= (int)sizeof(network_index)) {
-        network_index = htonl(g_interface_index);
-        return g_real_setsockopt(socket_handle, level, option_name, (const char *)&network_index, sizeof(network_index));
-    }
-    return g_real_setsockopt(socket_handle, level, option_name, option_value, option_length);
-}
-
-static int WSAAPI wel_send(SOCKET socket_handle, const char *buffer, int buffer_length, int flags) {
-    if (g_real_send == NULL) {
-        WSASetLastError(WSAEINVAL);
-        return SOCKET_ERROR;
-    }
-    if (is_udp_socket(socket_handle)) prepare_game_udp_socket(socket_handle);
-    return g_real_send(socket_handle, buffer, buffer_length, flags);
-}
-
-static int WSAAPI wel_wsasend(SOCKET socket_handle, LPWSABUF buffers, DWORD buffer_count, LPDWORD bytes_sent,
-    DWORD flags, LPWSAOVERLAPPED overlapped, LPWSAOVERLAPPED_COMPLETION_ROUTINE completion_routine) {
-    if (g_real_wsasend == NULL) {
-        WSASetLastError(WSAEINVAL);
-        return SOCKET_ERROR;
-    }
-    if (is_udp_socket(socket_handle)) prepare_game_udp_socket(socket_handle);
-    return g_real_wsasend(socket_handle, buffers, buffer_count, bytes_sent, flags, overlapped, completion_routine);
-}
-
 static int WSAAPI wel_sendto(
     SOCKET socket_handle,
     const char *buffer,
@@ -225,18 +144,11 @@ static int WSAAPI wel_sendto(
     int destination_length
 ) {
     struct sockaddr_in directed_destination;
-    if (g_real_sendto == NULL) {
-        WSASetLastError(WSAEINVAL);
-        return SOCKET_ERROR;
-    }
-    if (!is_udp_socket(socket_handle) || !is_non_loopback_ipv4_destination(destination, destination_length)) {
-        return g_real_sendto(socket_handle, buffer, buffer_length, flags, destination, destination_length);
-    }
-
-    prepare_game_udp_socket(socket_handle);
     if (!is_discovery_destination(destination, destination_length)) {
         return g_real_sendto(socket_handle, buffer, buffer_length, flags, destination, destination_length);
     }
+
+    ensure_udp_bound_to_tap(socket_handle);
     directed_discovery_destination(destination, &directed_destination);
     return g_real_sendto(
         socket_handle,
@@ -260,20 +172,12 @@ static int WSAAPI wel_wsasendto(
     LPWSAOVERLAPPED_COMPLETION_ROUTINE completion_routine
 ) {
     struct sockaddr_in directed_destination;
-    if (g_real_wsasendto == NULL) {
-        WSASetLastError(WSAEINVAL);
-        return SOCKET_ERROR;
-    }
-    if (!is_udp_socket(socket_handle) || !is_non_loopback_ipv4_destination(destination, destination_length)) {
-        return g_real_wsasendto(socket_handle, buffers, buffer_count, bytes_sent, flags,
-            destination, destination_length, overlapped, completion_routine);
-    }
-
-    prepare_game_udp_socket(socket_handle);
     if (!is_discovery_destination(destination, destination_length)) {
         return g_real_wsasendto(socket_handle, buffers, buffer_count, bytes_sent, flags,
             destination, destination_length, overlapped, completion_routine);
     }
+
+    ensure_udp_bound_to_tap(socket_handle);
     directed_discovery_destination(destination, &directed_destination);
     return g_real_wsasendto(socket_handle, buffers, buffer_count, bytes_sent, flags,
         (const struct sockaddr *)&directed_destination, sizeof(directed_destination),
@@ -321,29 +225,14 @@ static void patch_module_imports(HMODULE module) {
                     PIMAGE_IMPORT_BY_NAME import_name = (PIMAGE_IMPORT_BY_NAME)((BYTE *)module + names->u1.AddressOfData);
                     if (strcmp((const char *)import_name->Name, "bind") == 0) {
                         patch_import_slot(slot, (ULONG_PTR)wel_bind);
-                    } else if (strcmp((const char *)import_name->Name, "connect") == 0) {
-                        patch_import_slot(slot, (ULONG_PTR)wel_connect);
-                    } else if (strcmp((const char *)import_name->Name, "send") == 0) {
-                        patch_import_slot(slot, (ULONG_PTR)wel_send);
                     } else if (strcmp((const char *)import_name->Name, "sendto") == 0) {
                         patch_import_slot(slot, (ULONG_PTR)wel_sendto);
-                    } else if (strcmp((const char *)import_name->Name, "setsockopt") == 0) {
-                        patch_import_slot(slot, (ULONG_PTR)wel_setsockopt);
-                    } else if (strcmp((const char *)import_name->Name, "WSAConnect") == 0) {
-                        patch_import_slot(slot, (ULONG_PTR)wel_wsaconnect);
-                    } else if (strcmp((const char *)import_name->Name, "WSASend") == 0) {
-                        patch_import_slot(slot, (ULONG_PTR)wel_wsasend);
                     } else if (strcmp((const char *)import_name->Name, "WSASendTo") == 0) {
                         patch_import_slot(slot, (ULONG_PTR)wel_wsasendto);
                     }
                 } else {
                     if (*slot == (ULONG_PTR)g_real_bind) patch_import_slot(slot, (ULONG_PTR)wel_bind);
-                    else if (*slot == (ULONG_PTR)g_real_connect) patch_import_slot(slot, (ULONG_PTR)wel_connect);
-                    else if (*slot == (ULONG_PTR)g_real_send) patch_import_slot(slot, (ULONG_PTR)wel_send);
                     else if (*slot == (ULONG_PTR)g_real_sendto) patch_import_slot(slot, (ULONG_PTR)wel_sendto);
-                    else if (*slot == (ULONG_PTR)g_real_setsockopt) patch_import_slot(slot, (ULONG_PTR)wel_setsockopt);
-                    else if (*slot == (ULONG_PTR)g_real_wsaconnect) patch_import_slot(slot, (ULONG_PTR)wel_wsaconnect);
-                    else if (*slot == (ULONG_PTR)g_real_wsasend) patch_import_slot(slot, (ULONG_PTR)wel_wsasend);
                     else if (*slot == (ULONG_PTR)g_real_wsasendto) patch_import_slot(slot, (ULONG_PTR)wel_wsasendto);
                 }
                 if (names != NULL) ++names;
@@ -388,15 +277,9 @@ static int initialize_hook(void) {
     if (winsock == NULL) return 0;
 
     g_real_bind = (wel_bind_fn)GetProcAddress(winsock, "bind");
-    g_real_connect = (wel_connect_fn)GetProcAddress(winsock, "connect");
-    g_real_send = (wel_send_fn)GetProcAddress(winsock, "send");
     g_real_sendto = (wel_sendto_fn)GetProcAddress(winsock, "sendto");
-    g_real_setsockopt = (wel_setsockopt_fn)GetProcAddress(winsock, "setsockopt");
-    g_real_wsaconnect = (wel_wsaconnect_fn)GetProcAddress(winsock, "WSAConnect");
-    g_real_wsasend = (wel_wsasend_fn)GetProcAddress(winsock, "WSASend");
     g_real_wsasendto = (wel_wsasendto_fn)GetProcAddress(winsock, "WSASendTo");
-    if (g_real_bind == NULL || g_real_connect == NULL || g_real_send == NULL || g_real_sendto == NULL ||
-        g_real_setsockopt == NULL || g_real_wsaconnect == NULL || g_real_wsasend == NULL || g_real_wsasendto == NULL) return 0;
+    if (g_real_bind == NULL || g_real_sendto == NULL || g_real_wsasendto == NULL) return 0;
 
     patch_module_imports(GetModuleHandleW(NULL));
     worker = CreateThread(NULL, 0, module_watch_thread, NULL, 0, NULL);

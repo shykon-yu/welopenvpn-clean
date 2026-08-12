@@ -5,7 +5,7 @@ const { spawn } = require('node:child_process')
 const { formatProcessExitCode, inspectVpnNetwork, runPowerShell, runProcess, waitForVpnNetwork } = require('./network.cjs')
 const { ensureEdgeFirewall, ensureRoomUdpFirewall, ensureWin7RoomFirewall, isWindows7, win7FirewallRulesPresent } = require('./firewall.cjs')
 
-const DEFAULT_HOST = '8.133.189.9'
+const DEFAULT_HOST = '8.155.145.132'
 const DEFAULT_PORT = 22222
 const TAP_NAME = 'TAP-Windows Adapter V9'
 const WEL_TAP_NAME = /^(?:WEL Virtual LAN|WEL TAP|TAP-Windows Adapter V9|OpenVPN TAP-Windows6|以太网|本地连接)(?: \d+| #\d+)?$/i
@@ -409,6 +409,27 @@ function subnetMaskFromCidr(cidr) {
   return [24, 16, 8, 0].map((shift) => (mask >>> shift) & 255).join('.')
 }
 
+// 兜底：显式把房间网段路由钉到 TAP 网卡，防止 ZeroTier/Radmin 等第三方虚拟网卡
+// 以更低 metric 抢占路由，导致出站广播/单播走错网卡（表现为"我能搜到别人，别人搜不到我"）。
+// 对正常玩家是 no-op：TAP 网卡本就有该网段直连路由，change 只是等价地再显式指回 TAP。
+async function ensureRoomRoute(subnetCidr, tapIP, interfaceIndex) {
+  if (process.platform !== 'win32') return
+  const network = String(subnetCidr || '').split('/')[0]
+  const mask = subnetMaskFromCidr(subnetCidr)
+  const ifIndex = Number(interfaceIndex)
+  if (!network || !tapIP || !Number.isInteger(ifIndex) || ifIndex <= 0) return
+  const args = [network, 'mask', mask, tapIP, 'metric', '1', 'if', String(ifIndex)]
+  try {
+    await runProcess('route', ['change', ...args], 5000)
+  } catch {
+    try {
+      await runProcess('route', ['add', ...args], 5000)
+    } catch {
+      // 路由修正失败不阻塞已建立的 n2n 连接，保持原有行为
+    }
+  }
+}
+
 function prefixFromCidr(cidr) {
   const prefix = Number(String(cidr || '').split('/')[1])
   if (!Number.isInteger(prefix) || prefix < 0 || prefix > 32) return 24
@@ -667,6 +688,7 @@ async function connectAttempt({ executable, host, port, roomID, username, subnet
           if (connection?.process !== child) throw new Error('n2n 连接在准备游戏网络时已关闭')
           connection.network = inspectedNetwork
           initialized = true
+          await ensureRoomRoute(subnetCidr, inspectedNetwork.actualIp, inspectedNetwork.interfaceIndex)
           return inspectedNetwork
         }
       }
@@ -732,6 +754,7 @@ module.exports = {
   activeNetwork,
   buildEdgeArgs,
   connect,
+  ensureRoomRoute,
   isWelTapAdapter,
   isRetryableConnectError,
   n2nCommunity,

@@ -37,7 +37,7 @@ export type PingResult = {
 
 declare global {
   interface Window {
-    we8Desktop?: {
+    wrhDesktop?: {
       connectVpn: (lease: DesktopLease) => Promise<DesktopLeaseStatus>
       restoreVpn: (lease: Pick<DesktopLease, 'username' | 'subnetCidr'>) => Promise<DesktopLeaseStatus>
       inspectVpn: (lease: Pick<DesktopLease, 'username' | 'subnetCidr'>) => Promise<DesktopLeaseStatus>

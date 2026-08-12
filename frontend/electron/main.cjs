@@ -13,7 +13,7 @@ if (process.platform === 'win32') {
   app.commandLine.appendSwitch('no-sandbox')
 }
 
-const API_URL = process.env.VITE_API_BASE_URL || 'http://8.133.189.9:8082/api/v1'
+const API_URL = process.env.VITE_API_BASE_URL || 'http://8.155.145.132:8082/api/v1'
 const LOG_DIRECTORY = path.join(process.env.LOCALAPPDATA || app.getPath('userData'), 'WELPlatform', 'logs')
 const LOG_FILE = path.join(LOG_DIRECTORY, 'main.log')
 
@@ -35,7 +35,7 @@ function writeLog(message, error) {
 function showFatalError(error) {
   writeLog('应用发生致命错误', error)
   const detail = error instanceof Error ? error.message : String(error || '未知错误')
-  dialog.showErrorBox('WEL职业联盟对战平台启动失败', `${detail}\n\n错误日志：${LOG_FILE}`)
+  dialog.showErrorBox('WRH对战平台启动失败', `${detail}\n\n错误日志：${LOG_FILE}`)
 }
 
 function frontendEntryPath() {
@@ -47,7 +47,7 @@ function frontendEntryPath() {
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1180, height: 760, minWidth: 900, minHeight: 620,
-    title: `WEL职业联盟对战平台 v${appVersion}`,
+    title: `WRH对战平台 v${appVersion}`,
     backgroundColor: '#f4f7f6',
     webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: false },
   })
@@ -99,7 +99,7 @@ function createTray() {
     return
   }
   tray = new Tray(icon)
-  tray.setToolTip(`WEL职业联盟对战平台 v${appVersion}`)
+  tray.setToolTip(`WRH对战平台 v${appVersion}`)
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: '打开主界面', click: showMainWindow },
     { type: 'separator' },
@@ -114,7 +114,7 @@ function createChineseMenu() {
     { label: '编辑', submenu: [{ role: 'cut', label: '剪切' }, { role: 'copy', label: '复制' }, { role: 'paste', label: '粘贴' }, { role: 'selectAll', label: '全选' }] },
     { label: '查看', submenu: [{ role: 'resetZoom', label: '实际大小' }, { role: 'zoomIn', label: '放大' }, { role: 'zoomOut', label: '缩小' }, { type: 'separator' }, { role: 'togglefullscreen', label: '全屏' }] },
     { label: '帮助', submenu: [
-      { label: '关于 WEL职业联盟对战平台', click: () => dialog.showMessageBox({ type: 'info', title: '关于', message: `WEL职业联盟对战平台 v${appVersion}` }) },
+      { label: '关于 WRH对战平台', click: () => dialog.showMessageBox({ type: 'info', title: '关于', message: `WRH对战平台 v${appVersion}` }) },
     ] },
   ]))
 }
@@ -208,7 +208,7 @@ ipcMain.handle('launch-game', async (_event, gamePath) => {
 process.on('uncaughtException', (error) => showFatalError(error))
 process.on('unhandledRejection', (error) => showFatalError(error))
 
-writeLog(`正在启动 WEL职业联盟对战平台 v${appVersion}`)
+writeLog(`正在启动 WRH对战平台 v${appVersion}`)
 app.whenReady()
   .then(() => {
     process.env.VITE_API_BASE_URL = API_URL

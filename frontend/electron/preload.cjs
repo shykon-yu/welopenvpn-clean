@@ -1,6 +1,6 @@
 const { contextBridge, ipcRenderer } = require('electron')
 
-contextBridge.exposeInMainWorld('we8Desktop', {
+contextBridge.exposeInMainWorld('wrhDesktop', {
   connectVpn: (credentials) => ipcRenderer.invoke('connect-openvpn', credentials),
   restoreVpn: (lease) => ipcRenderer.invoke('inspect-openvpn', lease),
   inspectVpn: (lease) => ipcRenderer.invoke('inspect-openvpn', lease),

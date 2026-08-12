@@ -96,7 +96,7 @@ test('detects n2n network setup progress', () => {
   assert.match('created local tap device', N2N_PROGRESS)
   assert.match('successfully joined edge community', N2N_PROGRESS)
   assert.match('supernode_connect completed', N2N_PROGRESS)
-  assert.doesNotMatch('UDPv4 link remote: [AF_INET]8.133.189.9:12001', N2N_PROGRESS)
+  assert.doesNotMatch('UDPv4 link remote: [AF_INET]8.155.145.132:12001', N2N_PROGRESS)
 })
 
 test('retries transient n2n and TAP startup failures only', () => {

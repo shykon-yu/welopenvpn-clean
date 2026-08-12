@@ -44,10 +44,10 @@ const virtualIpLabel = computed(() => {
 })
 const connectionTitle = computed(() => {
   if (desktopStatus.value?.ready) return '联机组件已准备完成'
-  return '需要安装 WEL 联机组件'
+  return '需要安装 WRH 联机组件'
 })
 const gamePathLabel = computed(() => gamePath.value.trim() || '未选择 WE8 游戏程序')
-const desktop = () => window.we8Desktop
+const desktop = () => window.wrhDesktop
 const heartbeatIntervalMs = 5 * 60 * 1000
 const sessionCheckIntervalMs = 30 * 1000
 const roomMembersIntervalMs = 15 * 1000
@@ -417,8 +417,8 @@ onBeforeUnmount(() => {
   <main v-if="!user" class="auth-shell">
     <section class="auth-panel">
       <div class="brand-mark"><Gamepad2 :size="28" /></div>
-      <p class="eyebrow">WE8 ONLINE ARENA</p>
-      <h1>WEL职业联盟对战平台 <span class="app-version">{{ APP_VERSION }}</span></h1>
+      <p class="eyebrow">WRH ONLINE ARENA</p>
+      <h1>WRH对战平台 <span class="app-version">{{ APP_VERSION }}</span></h1>
       <form @submit.prevent="authenticate">
         <label>账号<input v-model.trim="form.username" autocomplete="username" placeholder="3 至 32 位账号" required /></label>
         <label>密码<input v-model="form.password" type="password" autocomplete="current-password" placeholder="至少 6 位" minlength="6" required /></label>
@@ -430,7 +430,7 @@ onBeforeUnmount(() => {
 
   <main v-else class="app-shell">
     <aside class="sidebar">
-      <div class="sidebar-brand"><span class="brand-mark"><Gamepad2 :size="22" /></span><span>WE8 Arena <span class="app-version">{{ APP_VERSION }}</span></span></div>
+      <div class="sidebar-brand"><span class="brand-mark"><Gamepad2 :size="22" /></span><span>WRH Arena <span class="app-version">{{ APP_VERSION }}</span></span></div>
       <div class="user-row"><span class="avatar">{{ user.nickname.slice(0, 1) }}</span><span><strong>{{ user.nickname }}</strong><small>@{{ user.username }}</small></span></div>
       <nav><a class="active"><Users :size="18" /> 对战房间</a></nav>
       <div class="sidebar-actions"><button class="logout" @click="logout"><LogOut :size="17" /> 退出登录</button></div>
