@@ -17,7 +17,11 @@ test('hides the Windows window into the system tray when closed', () => {
 
 test('packages a dedicated tray icon with the Windows client', () => {
   const packageJson = fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8')
-  assert.match(packageJson, /"from": "build\/icon\.ico"[\s\S]*"to": "welhelper\/wrh\.ico"/)
+  const iconMatch = packageJson.match(/"from": "build\/icon\.ico"[\s\S]*?"to": "welhelper\/([^"]+\.ico)"/)
+  assert.ok(iconMatch, 'package.json 应打包 build/icon.ico 到 welhelper/<name>.ico')
+  const iconName = iconMatch[1]
+  // 托盘图标路径必须引用同一个资源名，避免改名后托盘失效
+  assert.match(client, new RegExp(`welhelper[^\\n]*${iconName.replace(/\./g, '\\.')}`))
 })
 
 test('starts WE8 through the TAP socket-binding launcher only after room connection', () => {

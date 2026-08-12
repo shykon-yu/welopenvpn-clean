@@ -81,7 +81,7 @@ function showMainWindow() {
 
 function trayIconPath() {
   const candidates = app.isPackaged
-    ? [path.join(process.resourcesPath, 'welhelper', 'wel.ico')]
+    ? [path.join(process.resourcesPath, 'welhelper', 'wrh.ico')]
     : [path.join(__dirname, '..', 'build', 'icon.ico')]
   return candidates.find((candidate) => fs.existsSync(candidate)) || null
 }
