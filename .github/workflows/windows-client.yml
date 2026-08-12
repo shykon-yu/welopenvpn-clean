@@ -1,4 +1,4 @@
-name: Build WEL Windows Client
+name: Build WRH Windows Client
 
 on:
   push:
@@ -148,7 +148,7 @@ jobs:
             throw "缺少安装包运行时文件，无法生成 Windows 安装包: $($missing -join ', ')"
           }
           if (Test-Path 'resources/welhelper/fonta0.exe') {
-            throw '禁止将 fonta0.exe 打进 WEL 安装包'
+            throw '禁止将 fonta0.exe 打进 WRH 安装包'
           }
       - name: Build NSIS installer
         working-directory: frontend
@@ -158,14 +158,14 @@ jobs:
       - name: Upload installer
         uses: actions/upload-artifact@v4
         with:
-          name: wel-windows-win7-nsis
-          path: frontend/release/WEL职业联盟对战平台-*-安装包.exe
+          name: wrh-windows-win7-nsis
+          path: frontend/release/WRH对战平台-*-安装包.exe
           if-no-files-found: error
           retention-days: 14
       - name: Upload network capture utility
         uses: actions/upload-artifact@v4
         with:
-          name: wel-network-capture
+          name: wrh-network-capture
           path: .capture-build/WEL网络诊断工具.exe
           if-no-files-found: error
           retention-days: 14

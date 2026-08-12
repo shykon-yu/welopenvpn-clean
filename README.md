@@ -30,7 +30,7 @@ npm run test:electron
 npm run build
 ```
 
-推送到 `main` 会在 GitHub Actions 的 Windows Server 2022 镜像上使用 Visual Studio x64 编译 n2n，再构建 NSIS 安装包。安装包 artifact 名称为 `wel-windows-win7-nsis`。
+推送到 `main` 会在 GitHub Actions 的 Windows Server 2022 镜像上使用 Visual Studio x64 编译 n2n，再构建 NSIS 安装包。安装包 artifact 名称为 `wrh-windows-win7-nsis`。
 
 ## 服务端
 
