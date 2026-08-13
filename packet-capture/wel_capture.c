@@ -158,10 +158,14 @@ static void run_snapshot_command(const wchar_t *file_name, const wchar_t *comman
 
 static void read_log_tail(const wchar_t *file_name, wchar_t *buffer, size_t count) {
     wchar_t path[MAX_CAPTURE_PATH];
+    wchar_t diag_path[MAX_CAPTURE_PATH];
     FILE *file;
+    FILE *diag_file;
     long length;
     unsigned char raw[2048];
     size_t got;
+    UINT codepage = CP_ACP;
+    size_t text_offset = 0;
     buffer[0] = L'\0';
     if (count < 2) return;
     make_path(path, ARRAYSIZE(path), g_session.work_directory, file_name);
@@ -174,7 +178,26 @@ static void read_log_tail(const wchar_t *file_name, wchar_t *buffer, size_t coun
     else fseek(file, 0, SEEK_SET);
     got = fread(raw, 1, sizeof(raw) - 1, file);
     fclose(file);
+
+    // Diagnostic dump: write the head bytes of the file so we can confirm
+    // what encoding pktmon / netsh actually produced when reports come back.
+    make_path(diag_path, ARRAYSIZE(diag_path), g_session.work_directory, L"read-log-tail.hex");
+    diag_file = _wfopen(diag_path, L"ab");
+    if (diag_file != NULL) {
+        wchar_t hex_line[1100];
+        wchar_t hex_chunk[8];
+        size_t dump_i;
+        _snwprintf_s(hex_line, ARRAYSIZE(hex_line), _TRUNCATE, L"%ls: len=%ld head=", file_name, length);
+        for (dump_i = 0; dump_i < got && dump_i < 32; dump_i++) {
+            _snwprintf_s(hex_chunk, ARRAYSIZE(hex_chunk), _TRUNCATE, L"%02X ", raw[dump_i]);
+            wcsncat_s(hex_line, ARRAYSIZE(hex_line), hex_chunk, _TRUNCATE);
+        }
+        write_utf8_line(diag_file, hex_line);
+        fclose(diag_file);
+    }
+
     if (got >= 2 && raw[0] == 0xFF && raw[1] == 0xFE) {
+        // UTF-16 LE with BOM (FF FE) — pktmon classic console output.
         wchar_t *src = (wchar_t *)(raw + 2);
         size_t text_bytes = (got - 2) & ~(size_t)1;
         size_t text_chars = text_bytes / sizeof(wchar_t);
@@ -182,10 +205,40 @@ static void read_log_tail(const wchar_t *file_name, wchar_t *buffer, size_t coun
         if (text_chars > max_chars) text_chars = max_chars;
         wcsncpy_s(buffer, count, src, text_chars);
         buffer[text_chars] = L'\0';
-    } else {
-        raw[got] = 0;
-        MultiByteToWideChar(CP_ACP, 0, (const char *)raw, -1, buffer, (int)count - 1);
+        return;
     }
+    if (got >= 2 && raw[0] == 0xFE && raw[1] == 0xFF) {
+        // UTF-16 BE with BOM (FE FF) — swap byte pairs into LE wchar_t.
+        unsigned char *src = raw + 2;
+        size_t text_bytes = (got - 2) & ~(size_t)1;
+        size_t text_chars = text_bytes / sizeof(wchar_t);
+        size_t max_chars = (count / sizeof(wchar_t)) - 1;
+        size_t be_i;
+        if (text_chars > max_chars) text_chars = max_chars;
+        for (be_i = 0; be_i < text_chars; be_i++) {
+            buffer[be_i] = (wchar_t)((src[be_i * 2] << 8) | src[be_i * 2 + 1]);
+        }
+        buffer[text_chars] = L'\0';
+        return;
+    }
+    if (got >= 3 && raw[0] == 0xEF && raw[1] == 0xBB && raw[2] == 0xBF) {
+        // UTF-8 with BOM — modern pktmon / netsh on Win10 1903+.
+        text_offset = 3;
+        codepage = CP_UTF8;
+    } else {
+        // No BOM: probe UTF-8 first (modern pktmon default), fall back to
+        // CP_ACP (legacy netsh trace, ANSI captures). raw[got]=0 ensures the
+        // -1 length in MultiByteToWideChar sees a NUL terminator.
+        const char *probe = (const char *)raw;
+        raw[got] = 0;
+        if (MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, probe, -1, NULL, 0) == 0) {
+            codepage = CP_ACP;
+        } else {
+            codepage = CP_UTF8;
+        }
+    }
+    raw[got] = 0;
+    MultiByteToWideChar(codepage, 0, (const char *)(raw + text_offset), -1, buffer, (int)count - 1);
 }
 
 static void write_utf8_line(FILE *file, const wchar_t *text) {
