@@ -3,7 +3,8 @@
 `WEL网络诊断工具.exe` is a standalone Windows capture utility for recording a
 complete WE8 host/client session. It is intentionally outside the WEL client
 installer and does not install a virtual adapter, packet driver, or change a
-firewall rule.
+firewall rule. It may start the built-in Windows `PktMon` service for a
+capture; no third-party driver is installed.
 
 ## What It Produces
 

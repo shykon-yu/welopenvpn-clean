@@ -9,6 +9,7 @@
 #include <shlobj.h>
 #include <shellapi.h>
 #include <tlhelp32.h>
+#include <winsvc.h>
 #include <stdio.h>
 #include <stdint.h>
 #include <stdarg.h>
@@ -17,6 +18,7 @@
 #pragma comment(lib, "Iphlpapi.lib")
 #pragma comment(lib, "Shell32.lib")
 #pragma comment(lib, "Comctl32.lib")
+#pragma comment(lib, "Advapi32.lib")
 
 #define ID_ROLE 1001
 #define ID_START 1002
@@ -156,7 +158,148 @@ static void run_snapshot_command(const wchar_t *file_name, const wchar_t *comman
     run_command(command, g_session.work_directory, output, 30000);
 }
 
-static void write_utf8_line(FILE *file, const wchar_t *text);
+static int process_is_elevated(void) {
+    HANDLE token;
+    TOKEN_ELEVATION elevation;
+    DWORD size = 0;
+    int elevated = 0;
+    if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token)) return 0;
+    if (GetTokenInformation(token, TokenElevation, &elevation, sizeof(elevation), &size)) {
+        elevated = elevation.TokenIsElevated != 0;
+    }
+    CloseHandle(token);
+    return elevated;
+}
+
+static void write_pktmon_service_log(const wchar_t *stage, DWORD error_code, DWORD state) {
+    wchar_t path[MAX_CAPTURE_PATH];
+    wchar_t line[512];
+    FILE *file;
+    SYSTEMTIME now;
+    wchar_t error_text[256] = L"";
+    DWORD flags = FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS;
+    if (error_code != ERROR_SUCCESS) {
+        FormatMessageW(flags, NULL, error_code, 0, error_text, ARRAYSIZE(error_text), NULL);
+        for (DWORD index = 0; error_text[index] != L'\0'; ++index) {
+            if (error_text[index] == L'\r' || error_text[index] == L'\n') error_text[index] = L' ';
+        }
+    }
+    make_path(path, ARRAYSIZE(path), g_session.work_directory, L"pktmon-service.txt");
+    file = _wfopen(path, L"ab");
+    if (file == NULL) return;
+    GetLocalTime(&now);
+    _snwprintf_s(line, ARRAYSIZE(line), _TRUNCATE,
+        L"%04u-%02u-%02u %02u:%02u:%02u | %ls | state=%lu | error=%lu | %ls",
+        now.wYear, now.wMonth, now.wDay, now.wHour, now.wMinute, now.wSecond,
+        stage, (unsigned long)state, (unsigned long)error_code,
+        error_code == ERROR_SUCCESS ? L"OK" : error_text);
+    write_utf8_line(file, line);
+    fclose(file);
+}
+
+static int ensure_pktmon_service(void) {
+    SC_HANDLE manager;
+    SC_HANDLE service;
+    SERVICE_STATUS_PROCESS status;
+    QUERY_SERVICE_CONFIGW *config = NULL;
+    DWORD bytes = 0;
+    DWORD error;
+    DWORD waited;
+
+    manager = OpenSCManagerW(NULL, NULL, SC_MANAGER_CONNECT);
+    if (manager == NULL) {
+        error = GetLastError();
+        write_pktmon_service_log(L"OpenSCManager failed", error, 0);
+        return 0;
+    }
+    service = OpenServiceW(manager, L"PktMon",
+        SERVICE_QUERY_STATUS | SERVICE_QUERY_CONFIG | SERVICE_START);
+    if (service == NULL) {
+        error = GetLastError();
+        write_pktmon_service_log(L"OpenService PktMon failed", error, 0);
+        CloseServiceHandle(manager);
+        return 0;
+    }
+    if (!QueryServiceStatusEx(service, SC_STATUS_PROCESS_INFO,
+        (LPBYTE)&status, sizeof(status), &bytes)) {
+        error = GetLastError();
+        write_pktmon_service_log(L"QueryServiceStatusEx failed", error, 0);
+        CloseServiceHandle(service);
+        CloseServiceHandle(manager);
+        return 0;
+    }
+    write_pktmon_service_log(L"initial status", ERROR_SUCCESS, status.dwCurrentState);
+    if (status.dwCurrentState == SERVICE_RUNNING) {
+        CloseServiceHandle(service);
+        CloseServiceHandle(manager);
+        return 1;
+    }
+    if (!QueryServiceConfigW(service, NULL, 0, &bytes) && GetLastError() != ERROR_INSUFFICIENT_BUFFER) {
+        error = GetLastError();
+        write_pktmon_service_log(L"QueryServiceConfig size failed", error, status.dwCurrentState);
+        CloseServiceHandle(service);
+        CloseServiceHandle(manager);
+        return 0;
+    }
+    config = (QUERY_SERVICE_CONFIGW *)HeapAlloc(GetProcessHeap(), 0, bytes);
+    if (config == NULL || !QueryServiceConfigW(service, config, bytes, &bytes)) {
+        error = GetLastError();
+        write_pktmon_service_log(L"QueryServiceConfig failed", error, status.dwCurrentState);
+        HeapFree(GetProcessHeap(), 0, config);
+        CloseServiceHandle(service);
+        CloseServiceHandle(manager);
+        return 0;
+    }
+    if (config->dwStartType == SERVICE_DISABLED) {
+        CloseServiceHandle(service);
+        service = OpenServiceW(manager, L"PktMon",
+            SERVICE_QUERY_STATUS | SERVICE_QUERY_CONFIG | SERVICE_START | SERVICE_CHANGE_CONFIG);
+        if (service == NULL) {
+            error = GetLastError();
+            write_pktmon_service_log(L"OpenService for disabled PktMon failed", error, status.dwCurrentState);
+            HeapFree(GetProcessHeap(), 0, config);
+            CloseServiceHandle(manager);
+            return 0;
+        }
+        if (!ChangeServiceConfigW(service, SERVICE_NO_CHANGE, SERVICE_DEMAND_START,
+            SERVICE_NO_CHANGE, NULL, NULL, NULL, NULL, NULL, NULL, NULL)) {
+            error = GetLastError();
+            write_pktmon_service_log(L"ChangeServiceConfig demand-start failed", error, status.dwCurrentState);
+            HeapFree(GetProcessHeap(), 0, config);
+            CloseServiceHandle(service);
+            CloseServiceHandle(manager);
+            return 0;
+        }
+        write_pktmon_service_log(L"changed disabled service to demand-start", ERROR_SUCCESS, status.dwCurrentState);
+    }
+    HeapFree(GetProcessHeap(), 0, config);
+    if (!StartServiceW(service, 0, NULL)) {
+        error = GetLastError();
+        if (error != ERROR_SERVICE_ALREADY_RUNNING) {
+            write_pktmon_service_log(L"StartService PktMon failed", error, status.dwCurrentState);
+            CloseServiceHandle(service);
+            CloseServiceHandle(manager);
+            return 0;
+        }
+    }
+    for (waited = 0; waited < 5000; waited += 100) {
+        Sleep(100);
+        if (!QueryServiceStatusEx(service, SC_STATUS_PROCESS_INFO,
+            (LPBYTE)&status, sizeof(status), &bytes)) break;
+        if (status.dwCurrentState == SERVICE_RUNNING) {
+            write_pktmon_service_log(L"PktMon service running", ERROR_SUCCESS, status.dwCurrentState);
+            CloseServiceHandle(service);
+            CloseServiceHandle(manager);
+            return 1;
+        }
+        if (status.dwCurrentState == SERVICE_STOPPED) break;
+    }
+    error = GetLastError();
+    write_pktmon_service_log(L"PktMon service did not reach running state", error, status.dwCurrentState);
+    CloseServiceHandle(service);
+    CloseServiceHandle(manager);
+    return 0;
+}
 
 static void read_log_tail(const wchar_t *file_name, wchar_t *buffer, size_t count) {
     wchar_t path[MAX_CAPTURE_PATH];
@@ -569,6 +712,11 @@ static int start_packet_capture(void) {
     DWORD result;
     make_path(g_session.etl_file, ARRAYSIZE(g_session.etl_file), g_session.work_directory, L"packets.etl");
     DeleteFileW(g_session.etl_file);
+    post_status(L"Administrator token: %ls", process_is_elevated() ? L"yes" : L"no");
+    if (!process_is_elevated()) {
+        post_status(L"This tool must be started with Run as administrator; packet capture was not started.");
+        return 0;
+    }
     locate_command(L"pktmon.exe", g_session.pktmon_path, ARRAYSIZE(g_session.pktmon_path));
     locate_command(L"netsh.exe", g_session.netsh_path, ARRAYSIZE(g_session.netsh_path));
     if (g_session.pktmon_path[0] != L'\0') {
@@ -583,6 +731,9 @@ static int start_packet_capture(void) {
         run_command(command, g_session.work_directory, log, 10000);
         // Win11: ensure PktMon kernel driver is loadable before we ask pktmon to start.
         run_snapshot_command(L"pktmon-service-check.txt", L"sc.exe query PktMon");
+        if (!ensure_pktmon_service()) {
+            post_status(L"PktMon driver service could not be started; see pktmon-service.txt.");
+        }
         _snwprintf_s(command, ARRAYSIZE(command), _TRUNCATE, L"\"%ls\" start --capture --pkt-size 0 --file-name \"%ls\"", g_session.pktmon_path, g_session.etl_file);
         make_path(log, ARRAYSIZE(log), g_session.work_directory, L"pktmon-start.txt");
         result = run_command(command, g_session.work_directory, log, 30000);
