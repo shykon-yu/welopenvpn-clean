@@ -156,6 +156,8 @@ static void run_snapshot_command(const wchar_t *file_name, const wchar_t *comman
     run_command(command, g_session.work_directory, output, 30000);
 }
 
+static void write_utf8_line(FILE *file, const wchar_t *text);
+
 static void read_log_tail(const wchar_t *file_name, wchar_t *buffer, size_t count) {
     wchar_t path[MAX_CAPTURE_PATH];
     wchar_t diag_path[MAX_CAPTURE_PATH];
@@ -189,7 +191,7 @@ static void read_log_tail(const wchar_t *file_name, wchar_t *buffer, size_t coun
         size_t dump_i;
         _snwprintf_s(hex_line, ARRAYSIZE(hex_line), _TRUNCATE, L"%ls: len=%ld head=", file_name, length);
         for (dump_i = 0; dump_i < got && dump_i < 32; dump_i++) {
-            _snwprintf_s(hex_chunk, ARRAYSIZE(hex_chunk), _TRUNCATE, L"%02X ", raw[dump_i]);
+            _snwprintf_s(hex_chunk, ARRAYSIZE(hex_chunk), _TRUNCATE, L"%02X ", (unsigned int)raw[dump_i]);
             wcsncat_s(hex_line, ARRAYSIZE(hex_line), hex_chunk, _TRUNCATE);
         }
         write_utf8_line(diag_file, hex_line);
