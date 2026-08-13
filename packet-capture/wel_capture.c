@@ -156,6 +156,28 @@ static void run_snapshot_command(const wchar_t *file_name, const wchar_t *comman
     run_command(command, g_session.work_directory, output, 30000);
 }
 
+static void read_log_tail(const wchar_t *file_name, wchar_t *buffer, size_t count) {
+    wchar_t path[MAX_CAPTURE_PATH];
+    FILE *file;
+    long length;
+    char raw[2048];
+    size_t got;
+    buffer[0] = L'\0';
+    if (count < 2) return;
+    make_path(path, ARRAYSIZE(path), g_session.work_directory, file_name);
+    file = _wfopen(path, L"rb");
+    if (file == NULL) return;
+    fseek(file, 0, SEEK_END);
+    length = ftell(file);
+    if (length < 0) { fclose(file); return; }
+    if (length > (long)sizeof(raw) - 1) fseek(file, length - ((long)sizeof(raw) - 1), SEEK_SET);
+    else fseek(file, 0, SEEK_SET);
+    got = fread(raw, 1, sizeof(raw) - 1, file);
+    fclose(file);
+    raw[got] = '\0';
+    MultiByteToWideChar(CP_ACP, 0, raw, -1, buffer, (int)count - 1);
+}
+
 static void write_utf8_line(FILE *file, const wchar_t *text) {
     char buffer[2048];
     int count = WideCharToMultiByte(CP_UTF8, 0, text, -1, buffer, sizeof(buffer) - 2, NULL, NULL);
@@ -491,6 +513,9 @@ static int start_packet_capture(void) {
         _snwprintf_s(command, ARRAYSIZE(command), _TRUNCATE, L"\"%ls\" filter remove", g_session.pktmon_path);
         make_path(log, ARRAYSIZE(log), g_session.work_directory, L"pktmon-filter-reset.txt");
         run_command(command, g_session.work_directory, log, 10000);
+        _snwprintf_s(command, ARRAYSIZE(command), _TRUNCATE, L"\"%ls\" reset", g_session.pktmon_path);
+        make_path(log, ARRAYSIZE(log), g_session.work_directory, L"pktmon-reset.txt");
+        run_command(command, g_session.work_directory, log, 10000);
         _snwprintf_s(command, ARRAYSIZE(command), _TRUNCATE, L"\"%ls\" start --capture --pkt-size 0 --file-name \"%ls\"", g_session.pktmon_path, g_session.etl_file);
         make_path(log, ARRAYSIZE(log), g_session.work_directory, L"pktmon-start.txt");
         result = run_command(command, g_session.work_directory, log, 30000);
@@ -499,7 +524,13 @@ static int start_packet_capture(void) {
         make_path(log, ARRAYSIZE(log), g_session.work_directory, L"pktmon-start-fallback.txt");
         result = run_command(command, g_session.work_directory, log, 30000);
         if (result == 0) { g_session.mode = CAPTURE_PKTMON; return 1; }
-        post_status(L"pktmon start failed (code %lu); see pktmon-start*.txt. Trying Windows trace fallback.", (unsigned long)result);
+        {
+            wchar_t detail[1536];
+            read_log_tail(L"pktmon-start.txt", detail, ARRAYSIZE(detail));
+            if (detail[0] == L'\0') read_log_tail(L"pktmon-start-fallback.txt", detail, ARRAYSIZE(detail));
+            post_status(L"pktmon start failed (code %lu): %ls", (unsigned long)result,
+                detail[0] != L'\0' ? detail : L"(no output; pktmon usually requires Administrator rights)");
+        }
     } else {
         post_status(L"pktmon.exe was not found.");
     }
@@ -512,7 +543,12 @@ static int start_packet_capture(void) {
         make_path(log, ARRAYSIZE(log), g_session.work_directory, L"netsh-start.txt");
         result = run_command(command, g_session.work_directory, log, 30000);
         if (result == 0) { g_session.mode = CAPTURE_NETSH; return 1; }
-        post_status(L"Windows trace fallback failed (code %lu); see netsh-start.txt.", (unsigned long)result);
+        {
+            wchar_t detail[1536];
+            read_log_tail(L"netsh-start.txt", detail, ARRAYSIZE(detail));
+            post_status(L"Windows trace fallback failed (code %lu): %ls", (unsigned long)result,
+                detail[0] != L'\0' ? detail : L"(no output; netsh trace requires Administrator rights)");
+        }
     } else {
         post_status(L"netsh.exe was not found.");
     }
@@ -641,7 +677,13 @@ static LRESULT CALLBACK window_proc(HWND window, UINT message, WPARAM wparam, LP
         InterlockedExchange(&g_state, CAPTURE_IDLE);
         append_status(L"Capture failed. The working folder on the Desktop was kept for inspection.");
         EnableWindow(g_start_button, TRUE);
-        MessageBoxW(window, L"抓包启动或归档失败，请保留桌面的 WELCapture 文件夹。", L"WEL 网络诊断", MB_OK | MB_ICONERROR);
+        {
+            wchar_t status_text[4096];
+            wchar_t *tail = status_text;
+            GetWindowTextW(g_status, status_text, ARRAYSIZE(status_text));
+            if (wcslen(status_text) > 1200) tail = status_text + wcslen(status_text) - 1200;
+            MessageBoxW(window, tail, L"WEL 网络诊断 - 抓包失败原因", MB_OK | MB_ICONERROR);
+        }
         return 0;
     case WM_CLOSE:
         if (g_state == CAPTURE_RUNNING) {
