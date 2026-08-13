@@ -6,10 +6,12 @@ const {
   broadcastAddressFromCidr,
   gameRuntimeCandidates,
   normalizeNetwork,
+  subnetMaskFromCidr,
 } = require('./game-launch.cjs')
 
 test('builds socket-binding settings from the active TAP network', () => {
   assert.equal(broadcastAddressFromCidr('10.222.1.0/24'), '10.222.1.255')
+  assert.equal(subnetMaskFromCidr('10.222.1.0/24'), '255.255.255.0')
   assert.deepEqual(normalizeNetwork({
     actualIp: '10.222.1.10',
     interfaceIndex: 8,
@@ -19,6 +21,7 @@ test('builds socket-binding settings from the active TAP network', () => {
     interfaceIndex: 8,
     subnetCidr: '10.222.1.0/24',
     broadcastIP: '10.222.1.255',
+    subnetMask: '255.255.255.0',
   })
   assert.deepEqual(normalizeNetwork({
     actualIp: '10.222.1.10',
@@ -29,6 +32,7 @@ test('builds socket-binding settings from the active TAP network', () => {
     interfaceIndex: 0,
     subnetCidr: '10.222.1.0/24',
     broadcastIP: '10.222.1.255',
+    subnetMask: '255.255.255.0',
   })
   assert.throws(() => normalizeNetwork({
     actualIp: 'not-an-ip',
@@ -44,13 +48,21 @@ test('hooks WE8 UDP sockets before rewriting discovery destinations', () => {
   const hook = fs.readFileSync(path.join(__dirname, '..', '..', 'native', 'wel-game', 'wel_game_hook.c'), 'utf8')
   const launcher = fs.readFileSync(path.join(__dirname, '..', '..', 'native', 'wel-game', 'wel_game_launcher.c'), 'utf8')
   assert.match(hook, /wel_bind/)
+  assert.match(hook, /wel_connect/)
+  assert.match(hook, /wel_wsaconnect/)
+  assert.match(hook, /wel_send/)
   assert.match(hook, /wel_sendto/)
+  assert.match(hook, /wel_wsasend/)
   assert.match(hook, /wel_wsasendto/)
   assert.match(hook, /wsock32\.dll/)
   assert.match(hook, /WEL_HOOK_READY_EVENT/)
   assert.match(hook, /IP_UNICAST_IF/)
   assert.match(hook, /htons\(5739\)/)
   assert.match(hook, /INADDR_BROADCAST/)
+  assert.match(hook, /is_room_destination/)
+  assert.match(hook, /is_udp_socket\(socket_handle\) && is_room_destination/)
+  assert.match(hook, /WEL_SUBNET_MASK/)
+  assert.match(launcher, /--subnet-mask/)
   assert.match(launcher, /CREATE_SUSPENDED/)
   assert.match(launcher, /CreateRemoteThread/)
   assert.match(launcher, /Game network module did not initialize/)

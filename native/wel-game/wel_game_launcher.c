@@ -10,6 +10,7 @@ typedef struct {
     const wchar_t *hook_path;
     const wchar_t *tap_ip;
     const wchar_t *broadcast_ip;
+    const wchar_t *subnet_mask;
     const wchar_t *interface_index;
     int self_test;
 } wel_launch_options;
@@ -17,7 +18,7 @@ typedef struct {
 static void print_usage(void) {
     fwprintf(stderr,
         L"Usage: welgame.exe --game <path> --hook <path> --tap-ip <IPv4> "
-        L"--broadcast-ip <IPv4> --interface-index <index>\n");
+        L"--broadcast-ip <IPv4> --subnet-mask <IPv4> --interface-index <index>\n");
 }
 
 static int parse_options(int argc, wchar_t **argv, wel_launch_options *options) {
@@ -29,12 +30,13 @@ static int parse_options(int argc, wchar_t **argv, wel_launch_options *options) 
         else if (wcscmp(argv[index], L"--hook") == 0 && index + 1 < argc) options->hook_path = argv[++index];
         else if (wcscmp(argv[index], L"--tap-ip") == 0 && index + 1 < argc) options->tap_ip = argv[++index];
         else if (wcscmp(argv[index], L"--broadcast-ip") == 0 && index + 1 < argc) options->broadcast_ip = argv[++index];
+        else if (wcscmp(argv[index], L"--subnet-mask") == 0 && index + 1 < argc) options->subnet_mask = argv[++index];
         else if (wcscmp(argv[index], L"--interface-index") == 0 && index + 1 < argc) options->interface_index = argv[++index];
         else return 0;
     }
     if (options->self_test) return 1;
     return options->game_path != NULL && options->hook_path != NULL && options->tap_ip != NULL &&
-        options->broadcast_ip != NULL && options->interface_index != NULL;
+        options->broadcast_ip != NULL && options->subnet_mask != NULL && options->interface_index != NULL;
 }
 
 static wchar_t *quoted_command_line(const wchar_t *game_path) {
@@ -126,6 +128,7 @@ int wmain(int argc, wchar_t **argv) {
 
     SetEnvironmentVariableW(L"WEL_TAP_IP", options.tap_ip);
     SetEnvironmentVariableW(L"WEL_BROADCAST_IP", options.broadcast_ip);
+    SetEnvironmentVariableW(L"WEL_SUBNET_MASK", options.subnet_mask);
     SetEnvironmentVariableW(L"WEL_TAP_INTERFACE_INDEX", options.interface_index);
     _snwprintf_s(ready_event_name, ARRAYSIZE(ready_event_name), _TRUNCATE,
         L"Local\\WELGameHookReady-%lu-%lu", (unsigned long)GetCurrentProcessId(),

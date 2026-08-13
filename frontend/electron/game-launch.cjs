@@ -26,6 +26,14 @@ function broadcastAddressFromCidr(cidr) {
   return numberToIPv4(((network & mask) | (~mask >>> 0)) >>> 0)
 }
 
+function subnetMaskFromCidr(cidr) {
+  const prefix = Number(String(cidr || '').trim().split('/')[1])
+  if (!Number.isInteger(prefix) || prefix < 1 || prefix > 30) {
+    throw new Error('WEL 房间子网无法生成游戏子网掩码')
+  }
+  return numberToIPv4((0xffffffff << (32 - prefix)) >>> 0)
+}
+
 function gameRuntimeCandidates() {
   return [
     path.join(process.resourcesPath || '', 'welhelper', 'game-runtime'),
@@ -52,7 +60,13 @@ function normalizeNetwork(network) {
   if (ipv4ToNumber(tapIP) === null) {
     throw new Error('当前房间的 TAP 网卡信息不完整，请重新进入房间')
   }
-  return { tapIP, interfaceIndex, subnetCidr, broadcastIP: broadcastAddressFromCidr(subnetCidr) }
+  return {
+    tapIP,
+    interfaceIndex,
+    subnetCidr,
+    broadcastIP: broadcastAddressFromCidr(subnetCidr),
+    subnetMask: subnetMaskFromCidr(subnetCidr),
+  }
 }
 
 function launchGameBound(gamePath, network) {
@@ -67,6 +81,7 @@ function launchGameBound(gamePath, network) {
       '--hook', runtime.hook,
       '--tap-ip', target.tapIP,
       '--broadcast-ip', target.broadcastIP,
+      '--subnet-mask', target.subnetMask,
       '--interface-index', String(target.interfaceIndex),
     ], { cwd: path.dirname(gamePath), windowsHide: true })
     const output = []
@@ -96,4 +111,5 @@ module.exports = {
   launchGameBound,
   locateGameRuntime,
   normalizeNetwork,
+  subnetMaskFromCidr,
 }

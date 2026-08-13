@@ -1,7 +1,7 @@
 {
   "name": "wrh-openvpn-client",
   "private": true,
-  "version": "0.0.1",
+  "version": "0.0.2",
   "packageManager": "pnpm@11.11.0",
   "type": "module",
   "main": "electron/main.cjs",
@@ -78,7 +78,7 @@
       "perMachine": true,
       "allowElevation": true,
       "allowToChangeInstallationDirectory": true,
-      "shortcutName": "WRH对战平台 v0.0.1",
+      "shortcutName": "WRH对战平台 v0.0.2",
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true
     }

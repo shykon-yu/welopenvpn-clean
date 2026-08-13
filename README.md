@@ -21,6 +21,10 @@ WEL Windows 客户端通过 `n2n edge + TAP-Windows` 建立 WE8 虚拟局域网�
 - `third_party/n2n/`: 固定的官方 n2n 3.0 源码归档，GitHub Actions 从此源码编译 `edge.exe`。
 - `.github/workflows/windows-client.yml`: Windows x64 版本构建、测试和安装包上传。
 
+## 网络开发文档
+
+- [网络链路完整分析与开发基准](docs/WEL_NETWORK_ANALYSIS_ZH.md)：包含成功主客机抓包时序、TAP/n2n 数据路径、Hook Socket 绑定、防火墙和路由规则、故障定位矩阵，以及未来无虚拟网卡 Hook 方案的实现契约与验收条件。
+
 ## 构建与测试
 
 ```bash
