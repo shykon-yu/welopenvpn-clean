@@ -9,6 +9,7 @@ const {
   FIREWALL_RULE_VERSION,
   firewallHelperCandidates,
   firewallHelperExitReason,
+  firewallLogPath,
   WEL_ROOM_FIREWALL_SUBNET_CIDR,
 } = require('./firewall.cjs')
 
@@ -27,7 +28,7 @@ test('passes room and exact WE8 paths to the native firewall helper', () => {
   assert.throws(() => buildRoomFirewallArgs('', '10.222.1.0/24'), /组件路径为空/)
   assert.throws(() => buildWe8FirewallArgs(''), /程序路径为空/)
   assert.equal(WEL_ROOM_FIREWALL_SUBNET_CIDR, '10.222.0.0/16')
-  assert.equal(FIREWALL_RULE_VERSION, 5)
+  assert.equal(FIREWALL_RULE_VERSION, 6)
 })
 
 test('uses the bundled native helper without requiring PowerShell', () => {
@@ -37,6 +38,7 @@ test('uses the bundled native helper without requiring PowerShell', () => {
   assert.match(firewallHelperExitReason(10), /用户取消/)
   assert.match(firewallHelperExitReason(12), /规则写入失败/)
   assert.match(firewallHelperExitReason(21), /UDP 入站/)
+  assert.match(firewallLogPath(), /WELPlatform[/\\]logs[/\\]firewall\.log$/)
   assert.match(source, /buildRoomFirewallArgs\(edgePath, WEL_ROOM_FIREWALL_SUBNET_CIDR\)/)
 })
 
@@ -55,6 +57,14 @@ test('native helper repairs exact-path WE8 blocks and installs broad room rules'
   assert.match(source, /icmpv4:any,any/)
   assert.match(source, /WEL room UDP inbound/)
   assert.match(source, /WEL_FIREWALL_UDP_IN_FAILED/)
+  assert.match(source, /append_netsh_log/)
+  assert.match(source, /firewall\.log/)
+  assert.match(source, /dotted_subnet_to_cidr/)
+  assert.match(source, /10\.222\.0\.0\/255\.255\.0\.0/)
+  assert.match(source, /10\.222\.0\.0\/16/)
+  assert.match(source, /remoteip=%ls/)
+  assert.match(source, /protocol=udp enable=yes profile=any/)
+  assert.match(source, /protocol=UDP/)
   assert.match(source, /firewall add allowedprogram program=/)
   assert.match(source, /WEL n2n edge inbound/)
   assert.match(source, /WEL WE8 inbound/)

@@ -1,4 +1,5 @@
 const fs = require('node:fs')
+const os = require('node:os')
 const path = require('node:path')
 const { runProcess } = require('./network.cjs')
 
@@ -9,7 +10,7 @@ const ROOM_UDP_OUTBOUND_RULE = 'WEL room UDP outbound'
 const ROOM_ICMP_INBOUND_RULE = 'WEL room ICMPv4 inbound'
 const ROOM_ICMP_OUTBOUND_RULE = 'WEL room ICMPv4 outbound'
 const WEL_ROOM_FIREWALL_SUBNET_CIDR = '10.222.0.0/16'
-const FIREWALL_RULE_VERSION = 5
+const FIREWALL_RULE_VERSION = 6
 
 let activeRoomFirewallKey = null
 
@@ -30,6 +31,15 @@ function firewallHelperExitReason(code) {
   if (Number(code) === 12) return 'Windows 防火墙规则写入失败'
   if (Number(code) === 21) return 'Windows 防火墙无法放行房间 UDP 入站流量'
   return `Windows 防火墙授权程序退出（代码 ${code ?? '未知'}）`
+}
+
+function firewallLogPath() {
+  return path.join(
+    process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local'),
+    'WELPlatform',
+    'logs',
+    'firewall.log',
+  )
 }
 
 function cidrToFirewallSubnet(subnetCidr) {
@@ -68,7 +78,7 @@ async function runFirewallHelper(args) {
     await runProcess(helper, args, 45000)
   } catch (error) {
     const match = /退出代码\s+(-?\d+)/.exec(String(error?.message || ''))
-    if (match) throw new Error(firewallHelperExitReason(Number(match[1])))
+    if (match) throw new Error(`${firewallHelperExitReason(Number(match[1]))}\n防火墙日志：${firewallLogPath()}`)
     throw new Error(`Windows 防火墙授权失败：${error.message}`)
   }
   return true
@@ -112,5 +122,6 @@ module.exports = {
   ensureWe8Firewall,
   firewallHelperCandidates,
   firewallHelperExitReason,
+  firewallLogPath,
   locateFirewallHelper,
 }

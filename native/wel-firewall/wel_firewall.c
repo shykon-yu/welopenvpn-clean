@@ -19,6 +19,44 @@ typedef struct {
     int self_test;
 } wel_firewall_options;
 
+static void append_netsh_log(const wchar_t *arguments, DWORD exit_code) {
+    wchar_t local_app_data[MAX_PATH];
+    wchar_t platform_directory[MAX_PATH];
+    wchar_t log_directory[MAX_PATH];
+    wchar_t log_path[MAX_PATH];
+    wchar_t wide_line[4608];
+    char utf8_line[9216];
+    SYSTEMTIME time;
+    HANDLE file;
+    DWORD bytes_written;
+    int utf8_length;
+
+    if (GetEnvironmentVariableW(L"LOCALAPPDATA", local_app_data, ARRAYSIZE(local_app_data)) == 0) return;
+    if (_snwprintf_s(platform_directory, ARRAYSIZE(platform_directory), _TRUNCATE,
+        L"%ls\\WELPlatform", local_app_data) < 0) return;
+    if (_snwprintf_s(log_directory, ARRAYSIZE(log_directory), _TRUNCATE,
+        L"%ls\\logs", platform_directory) < 0) return;
+    if (_snwprintf_s(log_path, ARRAYSIZE(log_path), _TRUNCATE,
+        L"%ls\\firewall.log", log_directory) < 0) return;
+
+    CreateDirectoryW(platform_directory, NULL);
+    CreateDirectoryW(log_directory, NULL);
+    GetLocalTime(&time);
+    if (_snwprintf_s(wide_line, ARRAYSIZE(wide_line), _TRUNCATE,
+        L"[%04u-%02u-%02u %02u:%02u:%02u] exit=%lu netsh %ls\r\n",
+        time.wYear, time.wMonth, time.wDay, time.wHour, time.wMinute, time.wSecond,
+        (unsigned long)exit_code, arguments != NULL ? arguments : L"(unavailable)") < 0) return;
+
+    utf8_length = WideCharToMultiByte(CP_UTF8, 0, wide_line, -1, utf8_line,
+        (int)ARRAYSIZE(utf8_line), NULL, NULL);
+    if (utf8_length <= 1) return;
+    file = CreateFileW(log_path, FILE_APPEND_DATA, FILE_SHARE_READ | FILE_SHARE_WRITE,
+        NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (file == INVALID_HANDLE_VALUE) return;
+    WriteFile(file, utf8_line, (DWORD)(utf8_length - 1), &bytes_written, NULL);
+    CloseHandle(file);
+}
+
 static int valid_subnet(const wchar_t *value) {
     const wchar_t *cursor = value;
     if (value == NULL || *value == L'\0') return 0;
@@ -52,9 +90,15 @@ static int run_netsh(const wchar_t *arguments) {
     PROCESS_INFORMATION process;
     DWORD exit_code = 1;
 
-    if (GetSystemDirectoryW(system_directory, ARRAYSIZE(system_directory)) == 0) return 0;
+    if (GetSystemDirectoryW(system_directory, ARRAYSIZE(system_directory)) == 0) {
+        append_netsh_log(arguments, GetLastError());
+        return 0;
+    }
     if (_snwprintf_s(command_line, ARRAYSIZE(command_line), _TRUNCATE,
-        L"\"%ls\\netsh.exe\" %ls", system_directory, arguments) < 0) return 0;
+        L"\"%ls\\netsh.exe\" %ls", system_directory, arguments) < 0) {
+        append_netsh_log(arguments, ERROR_INSUFFICIENT_BUFFER);
+        return 0;
+    }
 
     ZeroMemory(&startup, sizeof(startup));
     ZeroMemory(&process, sizeof(process));
@@ -62,17 +106,82 @@ static int run_netsh(const wchar_t *arguments) {
     startup.dwFlags = STARTF_USESHOWWINDOW;
     startup.wShowWindow = SW_HIDE;
     if (!CreateProcessW(NULL, command_line, NULL, NULL, FALSE, CREATE_NO_WINDOW,
-        NULL, NULL, &startup, &process)) return 0;
+        NULL, NULL, &startup, &process)) {
+        append_netsh_log(arguments, GetLastError());
+        return 0;
+    }
     if (WaitForSingleObject(process.hProcess, 15000) != WAIT_OBJECT_0) {
         TerminateProcess(process.hProcess, 1);
         CloseHandle(process.hThread);
         CloseHandle(process.hProcess);
+        append_netsh_log(arguments, WAIT_TIMEOUT);
         return 0;
     }
     GetExitCodeProcess(process.hProcess, &exit_code);
     CloseHandle(process.hThread);
     CloseHandle(process.hProcess);
+    append_netsh_log(arguments, exit_code);
     return exit_code == 0;
+}
+
+static int dotted_subnet_to_cidr(const wchar_t *subnet, wchar_t *cidr, size_t cidr_count) {
+    wchar_t network[64];
+    const wchar_t *separator;
+    size_t network_length;
+    unsigned int a, b, c, d;
+    unsigned int m1, m2, m3, m4;
+    unsigned long mask;
+    int prefix = 0;
+    int zero_seen = 0;
+    int bit;
+
+    if (subnet == NULL) return 0;
+    separator = wcschr(subnet, L'/');
+    if (separator == NULL) return 0;
+    network_length = (size_t)(separator - subnet);
+    if (network_length == 0 || network_length >= ARRAYSIZE(network)) return 0;
+    wmemcpy(network, subnet, network_length);
+    network[network_length] = L'\0';
+    if (swscanf_s(network, L"%u.%u.%u.%u", &a, &b, &c, &d) != 4) return 0;
+    if (swscanf_s(separator + 1, L"%u.%u.%u.%u", &m1, &m2, &m3, &m4) != 4) return 0;
+    if (a > 255 || b > 255 || c > 255 || d > 255 ||
+        m1 > 255 || m2 > 255 || m3 > 255 || m4 > 255) return 0;
+    mask = (m1 << 24) | (m2 << 16) | (m3 << 8) | m4;
+    for (bit = 31; bit >= 0; --bit) {
+        if ((mask & (1UL << bit)) != 0) {
+            if (zero_seen) return 0;
+            ++prefix;
+        } else {
+            zero_seen = 1;
+        }
+    }
+    return _snwprintf_s(cidr, cidr_count, _TRUNCATE,
+        L"%u.%u.%u.%u/%d", a, b, c, d, prefix) >= 0;
+}
+
+static int add_udp_inbound_rule(const wchar_t *subnet) {
+    wchar_t command[4096];
+    wchar_t cidr[80];
+
+    if (dotted_subnet_to_cidr(subnet, cidr, ARRAYSIZE(cidr))) {
+        _snwprintf_s(command, ARRAYSIZE(command), _TRUNCATE,
+            L"advfirewall firewall add rule name=\"WEL room UDP inbound\" dir=in action=allow protocol=udp remoteip=%ls enable=yes profile=any",
+            cidr);
+        if (run_netsh(command)) return 1;
+    }
+
+    _snwprintf_s(command, ARRAYSIZE(command), _TRUNCATE,
+        L"advfirewall firewall add rule name=\"WEL room UDP inbound\" dir=in action=allow protocol=udp remoteip=%ls enable=yes profile=any",
+        subnet);
+    if (run_netsh(command)) return 1;
+
+    _snwprintf_s(command, ARRAYSIZE(command), _TRUNCATE,
+        L"advfirewall firewall add rule name=\"WEL room UDP inbound\" dir=in action=allow protocol=udp enable=yes profile=any");
+    if (run_netsh(command)) return 1;
+
+    _snwprintf_s(command, ARRAYSIZE(command), _TRUNCATE,
+        L"advfirewall firewall add rule name=\"WEL room UDP inbound\" dir=in action=allow protocol=UDP");
+    return run_netsh(command);
 }
 
 static int add_room_rules(const wel_firewall_options *options) {
@@ -96,10 +205,7 @@ static int add_room_rules(const wel_firewall_options *options) {
     /* The subnet UDP rule is the required game transport rule. Install it
        before optional per-program rules so old Win7 firewall stores cannot
        prevent room entry merely by rejecting a program path. */
-    _snwprintf_s(command, ARRAYSIZE(command), _TRUNCATE,
-        L"advfirewall firewall add rule name=\"WEL room UDP inbound\" dir=in action=allow protocol=udp remoteip=%ls enable=yes profile=any",
-        options->subnet);
-    if (!run_netsh(command)) return WEL_FIREWALL_UDP_IN_FAILED;
+    if (!add_udp_inbound_rule(options->subnet)) return WEL_FIREWALL_UDP_IN_FAILED;
 
     _snwprintf_s(command, ARRAYSIZE(command), _TRUNCATE,
         L"advfirewall firewall add rule name=\"WEL n2n edge inbound\" dir=in action=allow program=\"%ls\" enable=yes profile=any",
@@ -221,8 +327,13 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
         return WEL_FIREWALL_INVALID_ARGUMENTS;
     }
     if (options.self_test) {
+        wchar_t cidr[80];
+        result = dotted_subnet_to_cidr(L"10.222.0.0/255.255.0.0", cidr, ARRAYSIZE(cidr)) &&
+            wcscmp(cidr, L"10.222.0.0/16") == 0
+            ? WEL_FIREWALL_SUCCESS
+            : WEL_FIREWALL_INVALID_ARGUMENTS;
         LocalFree(argv);
-        return WEL_FIREWALL_SUCCESS;
+        return result;
     }
     /* Always use the proven Win7 runas path on the first invocation. Windows
        reuses an already elevated token without showing a second UAC prompt. */
