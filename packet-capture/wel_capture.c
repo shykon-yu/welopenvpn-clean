@@ -160,7 +160,7 @@ static void read_log_tail(const wchar_t *file_name, wchar_t *buffer, size_t coun
     wchar_t path[MAX_CAPTURE_PATH];
     FILE *file;
     long length;
-    char raw[2048];
+    unsigned char raw[2048];
     size_t got;
     buffer[0] = L'\0';
     if (count < 2) return;
@@ -174,8 +174,18 @@ static void read_log_tail(const wchar_t *file_name, wchar_t *buffer, size_t coun
     else fseek(file, 0, SEEK_SET);
     got = fread(raw, 1, sizeof(raw) - 1, file);
     fclose(file);
-    raw[got] = '\0';
-    MultiByteToWideChar(CP_ACP, 0, raw, -1, buffer, (int)count - 1);
+    if (got >= 2 && raw[0] == 0xFF && raw[1] == 0xFE) {
+        wchar_t *src = (wchar_t *)(raw + 2);
+        size_t text_bytes = (got - 2) & ~(size_t)1;
+        size_t text_chars = text_bytes / sizeof(wchar_t);
+        size_t max_chars = (count / sizeof(wchar_t)) - 1;
+        if (text_chars > max_chars) text_chars = max_chars;
+        wcsncpy_s(buffer, count, src, text_chars);
+        buffer[text_chars] = L'\0';
+    } else {
+        raw[got] = 0;
+        MultiByteToWideChar(CP_ACP, 0, (const char *)raw, -1, buffer, (int)count - 1);
+    }
 }
 
 static void write_utf8_line(FILE *file, const wchar_t *text) {
@@ -516,6 +526,8 @@ static int start_packet_capture(void) {
         _snwprintf_s(command, ARRAYSIZE(command), _TRUNCATE, L"\"%ls\" reset", g_session.pktmon_path);
         make_path(log, ARRAYSIZE(log), g_session.work_directory, L"pktmon-reset.txt");
         run_command(command, g_session.work_directory, log, 10000);
+        // Win11: ensure PktMon kernel driver is loadable before we ask pktmon to start.
+        run_snapshot_command(L"pktmon-service-check.txt", L"sc.exe query PktMon");
         _snwprintf_s(command, ARRAYSIZE(command), _TRUNCATE, L"\"%ls\" start --capture --pkt-size 0 --file-name \"%ls\"", g_session.pktmon_path, g_session.etl_file);
         make_path(log, ARRAYSIZE(log), g_session.work_directory, L"pktmon-start.txt");
         result = run_command(command, g_session.work_directory, log, 30000);
@@ -553,6 +565,7 @@ static int start_packet_capture(void) {
         post_status(L"netsh.exe was not found.");
     }
     post_status(L"No usable Windows packet capture session could be started.");
+    post_status(L"Win11 hint: open an elevated cmd and run 'sc.exe config PktMon start= demand' then 'sc.exe start PktMon', and make sure no 3rd party antivirus (360 / Tencent PC Manager) or Smart App Control is blocking the PktMon driver. The WELCapture folder on the Desktop was kept for inspection.");
     return 0;
 }
 
