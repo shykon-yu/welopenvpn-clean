@@ -9,7 +9,7 @@ const ROOM_UDP_OUTBOUND_RULE = 'WEL room UDP outbound'
 const ROOM_ICMP_INBOUND_RULE = 'WEL room ICMPv4 inbound'
 const ROOM_ICMP_OUTBOUND_RULE = 'WEL room ICMPv4 outbound'
 const WEL_ROOM_FIREWALL_SUBNET_CIDR = '10.222.0.0/16'
-const FIREWALL_RULE_VERSION = 4
+const FIREWALL_RULE_VERSION = 5
 
 let activeRoomFirewallKey = null
 
@@ -28,9 +28,7 @@ function firewallHelperExitReason(code) {
   if (Number(code) === 10) return '用户取消了 Windows 防火墙授权'
   if (Number(code) === 11) return 'Windows 无法启动防火墙授权程序'
   if (Number(code) === 12) return 'Windows 防火墙规则写入失败'
-  if (Number(code) === 20) return 'Windows 防火墙无法放行 n2n 联机组件'
   if (Number(code) === 21) return 'Windows 防火墙无法放行房间 UDP 入站流量'
-  if (Number(code) === 26) return 'Windows 防火墙无法放行当前 WE8.exe'
   return `Windows 防火墙授权程序退出（代码 ${code ?? '未知'}）`
 }
 

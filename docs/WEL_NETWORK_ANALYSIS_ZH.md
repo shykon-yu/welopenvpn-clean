@@ -486,14 +486,15 @@ Hook 仅在目标同时满足“IPv4、端口 `5739`、地址为全局广播”�
 - 对 WE8 精确程序路径放行入站。
 - 对房间虚拟网段放行 ICMPv4，便于 Ping 与基础诊断。
 
-### 7.2 Windows 7/10/11 统一规则（v0.0.4）
+### 7.2 Windows 7/10/11 统一规则（v0.0.5）
 
-`v0.0.4` 不再使用 PowerShell COM 创建或验证防火墙规则。所有支持的 Windows 版本统一调用原生 `welfirewall.exe`，由它使用系统 `netsh advfirewall` 写入规则：
+`v0.0.5` 不再使用 PowerShell COM 创建或验证防火墙规则。所有支持的 Windows 版本统一调用原生 `welfirewall.exe`，由它使用系统 `netsh advfirewall` 写入规则：
 
 1. 辅助程序首次调用固定通过系统 `runas` 获取已提权令牌，避免 Win7 将“管理员组成员”误判成“当前进程已经提权”。
 2. 平台已经提权时 Windows 直接复用权限；绿色环境权限不足时显示系统 UAC。
 3. 不再依赖 `EncodedCommand`、PowerShell 模块初始化或 `HNetCfg.FwPolicy2`。
 4. 因 PowerShell 被安全软件终止而产生的退出代码 `-1 (0xFFFFFFFF)` 不再阻塞进入房间。
+5. 必需的房间 UDP 入站规则先写入；edge/WE8 程序规则失败时回退到 Win7 旧版 `netsh firewall add allowedprogram`，仍失败也不阻塞房间或游戏启动。
 
 进入房间时使用固定 `10.222.0.0/16` 创建以下规则；同一次平台运行只配置一次，切换房间不重复授权：
 
@@ -513,7 +514,7 @@ Hook 仅在目标同时满足“IPv4、端口 `5739`、地址为全局广播”�
 
 `WEL WE8 inbound` 使用精确程序路径。玩家换了另一个 WE8 目录后，应以新路径重建规则。
 
-### 7.3 WE8 显式 Block 冲突修复（v0.0.4）
+### 7.3 WE8 显式 Block 冲突修复（v0.0.5）
 
 Windows 防火墙中，同一程序同时存在 Allow 与 Block 时，显式 Block 优先。仅增加 `WEL WE8 inbound` 无法覆盖玩家以前在系统联网提示中选择“不允许访问”产生的规则。
 

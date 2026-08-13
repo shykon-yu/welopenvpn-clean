@@ -9,9 +9,7 @@
 #define WEL_FIREWALL_INVALID_ARGUMENTS 2
 #define WEL_FIREWALL_UAC_CANCELLED 10
 #define WEL_FIREWALL_ELEVATION_FAILED 11
-#define WEL_FIREWALL_EDGE_FAILED 20
 #define WEL_FIREWALL_UDP_IN_FAILED 21
-#define WEL_FIREWALL_GAME_FAILED 26
 
 typedef struct {
     const wchar_t *subnet;
@@ -95,15 +93,23 @@ static int add_room_rules(const wel_firewall_options *options) {
         run_netsh(command);
     }
 
-    _snwprintf_s(command, ARRAYSIZE(command), _TRUNCATE,
-        L"advfirewall firewall add rule name=\"WEL n2n edge inbound\" dir=in action=allow program=\"%ls\" enable=yes profile=any",
-        options->edge_path);
-    if (!run_netsh(command)) return WEL_FIREWALL_EDGE_FAILED;
-
+    /* The subnet UDP rule is the required game transport rule. Install it
+       before optional per-program rules so old Win7 firewall stores cannot
+       prevent room entry merely by rejecting a program path. */
     _snwprintf_s(command, ARRAYSIZE(command), _TRUNCATE,
         L"advfirewall firewall add rule name=\"WEL room UDP inbound\" dir=in action=allow protocol=udp remoteip=%ls enable=yes profile=any",
         options->subnet);
     if (!run_netsh(command)) return WEL_FIREWALL_UDP_IN_FAILED;
+
+    _snwprintf_s(command, ARRAYSIZE(command), _TRUNCATE,
+        L"advfirewall firewall add rule name=\"WEL n2n edge inbound\" dir=in action=allow program=\"%ls\" enable=yes profile=any",
+        options->edge_path);
+    if (!run_netsh(command)) {
+        _snwprintf_s(command, ARRAYSIZE(command), _TRUNCATE,
+            L"firewall add allowedprogram program=\"%ls\" name=\"WEL n2n edge inbound\" mode=ENABLE scope=ALL profile=ALL",
+            options->edge_path);
+        run_netsh(command);
+    }
 
     _snwprintf_s(command, ARRAYSIZE(command), _TRUNCATE,
         L"advfirewall firewall add rule name=\"WEL room UDP outbound\" dir=out action=allow protocol=udp remoteip=%ls enable=yes profile=any",
@@ -136,7 +142,17 @@ static int add_game_rule(const wel_firewall_options *options) {
     _snwprintf_s(command, ARRAYSIZE(command), _TRUNCATE,
         L"advfirewall firewall add rule name=\"WEL WE8 inbound\" dir=in action=allow program=\"%ls\" protocol=any enable=yes profile=any",
         options->game_path);
-    return run_netsh(command) ? WEL_FIREWALL_SUCCESS : WEL_FIREWALL_GAME_FAILED;
+    if (!run_netsh(command)) {
+        _snwprintf_s(command, ARRAYSIZE(command), _TRUNCATE,
+            L"firewall add allowedprogram program=\"%ls\" name=\"WEL WE8 inbound\" mode=ENABLE scope=ALL profile=ALL",
+            options->game_path);
+        run_netsh(command);
+    }
+
+    /* The room-wide UDP rule already covers WE8 traffic. A machine that
+       rejects both per-program syntaxes must still be allowed to start the
+       game instead of being trapped before the socket hook can run. */
+    return WEL_FIREWALL_SUCCESS;
 }
 
 static int apply_rules(const wel_firewall_options *options) {
