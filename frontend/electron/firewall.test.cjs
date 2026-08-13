@@ -27,7 +27,7 @@ test('passes room and exact WE8 paths to the native firewall helper', () => {
   assert.throws(() => buildRoomFirewallArgs('', '10.222.1.0/24'), /组件路径为空/)
   assert.throws(() => buildWe8FirewallArgs(''), /程序路径为空/)
   assert.equal(WEL_ROOM_FIREWALL_SUBNET_CIDR, '10.222.0.0/16')
-  assert.equal(FIREWALL_RULE_VERSION, 3)
+  assert.equal(FIREWALL_RULE_VERSION, 4)
 })
 
 test('uses the bundled native helper without requiring PowerShell', () => {
@@ -36,13 +36,18 @@ test('uses the bundled native helper without requiring PowerShell', () => {
   assert.doesNotMatch(source, /runPowerShell|EncodedCommand|HNetCfg/)
   assert.match(firewallHelperExitReason(10), /用户取消/)
   assert.match(firewallHelperExitReason(12), /规则写入失败/)
+  assert.match(firewallHelperExitReason(20), /n2n/)
+  assert.match(firewallHelperExitReason(21), /UDP 入站/)
+  assert.match(firewallHelperExitReason(26), /WE8/)
+  assert.match(source, /buildRoomFirewallArgs\(edgePath, WEL_ROOM_FIREWALL_SUBNET_CIDR\)/)
 })
 
 test('native helper repairs exact-path WE8 blocks and installs broad room rules', () => {
   const source = fs.readFileSync(path.join(__dirname, '..', '..', 'native', 'wel-firewall', 'wel_firewall.c'), 'utf8')
   assert.match(source, /ShellExecuteExW/)
   assert.match(source, /lpVerb = L"runas"/)
-  assert.match(source, /is_process_elevated/)
+  assert.doesNotMatch(source, /is_process_elevated/)
+  assert.match(source, /options\.elevated \? apply_rules\(&options\) : elevate_self\(&options\)/)
   assert.match(source, /netsh\.exe/)
   assert.match(source, /delete rule name=all dir=in program=/)
   assert.match(source, /WEL WE8 inbound/)
@@ -51,4 +56,6 @@ test('native helper repairs exact-path WE8 blocks and installs broad room rules'
   assert.match(source, /remoteip=%ls/)
   assert.match(source, /icmpv4:any,any/)
   assert.match(source, /WEL room UDP inbound/)
+  assert.match(source, /WEL_FIREWALL_EDGE_FAILED/)
+  assert.match(source, /WEL_FIREWALL_UDP_IN_FAILED/)
 })

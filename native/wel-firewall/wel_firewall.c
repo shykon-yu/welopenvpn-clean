@@ -9,7 +9,9 @@
 #define WEL_FIREWALL_INVALID_ARGUMENTS 2
 #define WEL_FIREWALL_UAC_CANCELLED 10
 #define WEL_FIREWALL_ELEVATION_FAILED 11
-#define WEL_FIREWALL_NETSH_FAILED 12
+#define WEL_FIREWALL_EDGE_FAILED 20
+#define WEL_FIREWALL_UDP_IN_FAILED 21
+#define WEL_FIREWALL_GAME_FAILED 26
 
 typedef struct {
     const wchar_t *subnet;
@@ -43,17 +45,6 @@ static int parse_options(int argc, wchar_t **argv, wel_firewall_options *options
     if (options->self_test) return 1;
     if (options->game_path != NULL && *options->game_path != L'\0') return 1;
     return valid_subnet(options->subnet) && options->edge_path != NULL && *options->edge_path != L'\0';
-}
-
-static int is_process_elevated(void) {
-    SID_IDENTIFIER_AUTHORITY authority = SECURITY_NT_AUTHORITY;
-    PSID administrators = NULL;
-    BOOL is_member = FALSE;
-    if (!AllocateAndInitializeSid(&authority, 2, SECURITY_BUILTIN_DOMAIN_RID,
-        DOMAIN_ALIAS_RID_ADMINS, 0, 0, 0, 0, 0, 0, &administrators)) return 0;
-    CheckTokenMembership(NULL, administrators, &is_member);
-    FreeSid(administrators);
-    return is_member ? 1 : 0;
 }
 
 static int run_netsh(const wchar_t *arguments) {
@@ -107,33 +98,34 @@ static int add_room_rules(const wel_firewall_options *options) {
     _snwprintf_s(command, ARRAYSIZE(command), _TRUNCATE,
         L"advfirewall firewall add rule name=\"WEL n2n edge inbound\" dir=in action=allow program=\"%ls\" enable=yes profile=any",
         options->edge_path);
-    if (!run_netsh(command)) return 0;
+    if (!run_netsh(command)) return WEL_FIREWALL_EDGE_FAILED;
 
     _snwprintf_s(command, ARRAYSIZE(command), _TRUNCATE,
         L"advfirewall firewall add rule name=\"WEL room UDP inbound\" dir=in action=allow protocol=udp remoteip=%ls enable=yes profile=any",
         options->subnet);
-    if (!run_netsh(command)) return 0;
+    if (!run_netsh(command)) return WEL_FIREWALL_UDP_IN_FAILED;
 
     _snwprintf_s(command, ARRAYSIZE(command), _TRUNCATE,
         L"advfirewall firewall add rule name=\"WEL room UDP outbound\" dir=out action=allow protocol=udp remoteip=%ls enable=yes profile=any",
         options->subnet);
-    if (!run_netsh(command)) return 0;
+    run_netsh(command);
 
     _snwprintf_s(command, ARRAYSIZE(command), _TRUNCATE,
         L"advfirewall firewall add rule name=\"WEL room ICMPv4 inbound\" dir=in action=allow protocol=icmpv4:any,any remoteip=%ls enable=yes profile=any",
         options->subnet);
-    if (!run_netsh(command)) return 0;
+    run_netsh(command);
 
     _snwprintf_s(command, ARRAYSIZE(command), _TRUNCATE,
         L"advfirewall firewall add rule name=\"WEL room ICMPv4 outbound\" dir=out action=allow protocol=icmpv4:any,any remoteip=%ls enable=yes profile=any",
         options->subnet);
-    return run_netsh(command);
+    run_netsh(command);
+    return WEL_FIREWALL_SUCCESS;
 }
 
 static int add_game_rule(const wel_firewall_options *options) {
     wchar_t command[4096];
 
-    if (options->game_path == NULL || *options->game_path == L'\0') return 1;
+    if (options->game_path == NULL || *options->game_path == L'\0') return WEL_FIREWALL_SUCCESS;
 
     /* Reset only rules attached to this exact executable. This removes a
        previous "Block" choice, which otherwise overrides every Allow rule. */
@@ -144,11 +136,15 @@ static int add_game_rule(const wel_firewall_options *options) {
     _snwprintf_s(command, ARRAYSIZE(command), _TRUNCATE,
         L"advfirewall firewall add rule name=\"WEL WE8 inbound\" dir=in action=allow program=\"%ls\" protocol=any enable=yes profile=any",
         options->game_path);
-    return run_netsh(command);
+    return run_netsh(command) ? WEL_FIREWALL_SUCCESS : WEL_FIREWALL_GAME_FAILED;
 }
 
 static int apply_rules(const wel_firewall_options *options) {
-    if (options->subnet != NULL && options->edge_path != NULL && !add_room_rules(options)) return 0;
+    int result = WEL_FIREWALL_SUCCESS;
+    if (options->subnet != NULL && options->edge_path != NULL) {
+        result = add_room_rules(options);
+        if (result != WEL_FIREWALL_SUCCESS) return result;
+    }
     return add_game_rule(options);
 }
 
@@ -212,9 +208,9 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
         LocalFree(argv);
         return WEL_FIREWALL_SUCCESS;
     }
-    result = (options.elevated || is_process_elevated())
-        ? (apply_rules(&options) ? WEL_FIREWALL_SUCCESS : WEL_FIREWALL_NETSH_FAILED)
-        : elevate_self(&options);
+    /* Always use the proven Win7 runas path on the first invocation. Windows
+       reuses an already elevated token without showing a second UAC prompt. */
+    result = options.elevated ? apply_rules(&options) : elevate_self(&options);
     LocalFree(argv);
     return result;
 }
