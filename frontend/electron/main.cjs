@@ -5,7 +5,7 @@ const path = require('node:path')
 const { pathToFileURL } = require('node:url')
 const { version: appVersion } = require('../package.json')
 const { decodeProcessOutput, inspectVpnNetwork } = require('./network.cjs')
-const { ensureWe8Firewall, isWindows7 } = require('./firewall.cjs')
+const { ensureWe8Firewall } = require('./firewall.cjs')
 const { launchGameBound } = require('./game-launch.cjs')
 const openvpn = require('./openvpn.cjs')
 
@@ -167,22 +167,7 @@ ipcMain.handle('prepare-openvpn', async () => {
     throw error
   }
 })
-ipcMain.handle('connect-openvpn', async (event, credentials) => {
-  const requestFirewallAccess = async () => {
-    const result = await dialog.showMessageBox(BrowserWindow.fromWebContents(event.sender), {
-      type: 'warning',
-      title: '需要 Windows 防火墙授权',
-      message: '进入房间需要允许 WEL 配置 Windows 防火墙规则。',
-      detail: '点击“允许并进入”后，Windows 会显示权限确认。请选择“是”，平台将在规则写入成功后继续进入房间。',
-      buttons: ['允许并进入', '取消'],
-      defaultId: 0,
-      cancelId: 1,
-      noLink: true,
-    })
-    if (result.response !== 0) throw new Error('已取消 Windows 防火墙授权，无法进入房间')
-  }
-  return openvpn.connect({ ...credentials, requestFirewallAccess })
-})
+ipcMain.handle('connect-openvpn', (_event, credentials) => openvpn.connect(credentials))
 ipcMain.handle('disconnect-openvpn', () => openvpn.stopConnection())
 ipcMain.handle('inspect-openvpn', (_event, { subnetCidr }) => inspectVpnNetwork(subnetCidr))
 ipcMain.handle('ping-host', (_event, host) => pingHost(host))
@@ -194,13 +179,7 @@ ipcMain.handle('launch-game', async (_event, gamePath) => {
   const executable = resolveGameExecutable(gamePath)
   const network = openvpn.activeNetwork()
   if (!network?.connected) throw new Error('请先进入房间并等待 WEL TAP 网卡连接完成')
-  if (!isWindows7()) {
-    try {
-      await ensureWe8Firewall(executable)
-    } catch (error) {
-      writeLog('配置 WE8 防火墙规则失败', error)
-    }
-  }
+  await ensureWe8Firewall(executable)
   const result = await launchGameBound(executable, network)
   writeLog(`WE8 已通过 TAP Socket 绑定启动：${result}`)
 })

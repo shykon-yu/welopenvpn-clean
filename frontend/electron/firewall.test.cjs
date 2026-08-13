@@ -3,98 +3,52 @@ const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
 const {
-  buildEdgeFirewallScript,
-  buildFirewallRuleCheckScript,
-  buildRoomUdpFirewallScript,
-  buildWe8FirewallScript,
+  buildRoomFirewallArgs,
+  buildWe8FirewallArgs,
   cidrToFirewallSubnet,
-  LEGACY_WE8_RULES,
-  EDGE_INBOUND_RULE,
-  LEGACY_GAME_DISCOVERY_RULE,
-  ROOM_ICMP_INBOUND_RULE,
-  ROOM_ICMP_OUTBOUND_RULE,
-  ROOM_UDP_INBOUND_RULE,
-  ROOM_UDP_OUTBOUND_RULE,
-  WE8_INBOUND_RULE,
+  FIREWALL_RULE_VERSION,
   firewallHelperCandidates,
   firewallHelperExitReason,
-  isWindows7,
-  normalizeFirewallProgramPath,
   WEL_ROOM_FIREWALL_SUBNET_CIDR,
-  WIN7_FIREWALL_RULE_VERSION,
-  win7FirewallRulesPresent,
 } = require('./firewall.cjs')
 
-test('allows all inbound traffic for the selected WE8 executable', () => {
-  const script = buildWe8FirewallScript('C:\\Games\\WE8.exe')
-  assert.match(script, /C:\\Games\\WE8\.exe/)
-  assert.match(script, new RegExp(WE8_INBOUND_RULE))
-  assert.match(script, /\$rule\.Protocol = 256/)
-  assert.match(script, /\$rule\.Direction = 1/)
-  assert.doesNotMatch(script, /LocalPorts|RemotePorts|RemoteAddresses/)
-  for (const rule of LEGACY_WE8_RULES) assert.match(script, new RegExp(rule))
-})
-
-test('allows all inbound traffic for the bundled n2n edge executable', () => {
-  const script = buildEdgeFirewallScript('C:\\Program Files\\WEL\\resources\\welhelper\\edge.exe')
-  assert.match(script, /edge\.exe/)
-  assert.match(script, new RegExp(EDGE_INBOUND_RULE))
-  assert.match(script, /\$rule\.Protocol = 256/)
-  assert.match(script, /\$rule\.Direction = 1/)
-})
-
-test('allows room UDP and ICMPv4 traffic in both directions on the active WEL virtual subnet', () => {
-  const script = buildRoomUdpFirewallScript('10.222.1.0/24')
-  assert.match(script, new RegExp(ROOM_UDP_INBOUND_RULE))
-  assert.match(script, new RegExp(ROOM_UDP_OUTBOUND_RULE))
-  assert.match(script, new RegExp(ROOM_ICMP_INBOUND_RULE))
-  assert.match(script, new RegExp(ROOM_ICMP_OUTBOUND_RULE))
-  assert.match(script, new RegExp(LEGACY_GAME_DISCOVERY_RULE))
-  assert.match(script, /Protocol = 17/)
-  assert.match(script, /Protocol = 1/)
-  assert.match(script, /\$rule\.Protocol = \$definition\.Protocol/)
-  assert.match(script, /Direction = 1/)
-  assert.match(script, /Direction = 2/)
-  assert.match(script, /\$rule\.RemoteAddresses = '10\.222\.1\.0\/255\.255\.255\.0'/)
-  assert.doesNotMatch(script, /LocalPorts|RemotePorts|ApplicationName/)
-  assert.throws(() => buildRoomUdpFirewallScript('not-a-subnet'), /房间子网格式不正确/)
-  assert.throws(() => buildRoomUdpFirewallScript('10.222.999.0/24'), /房间子网格式不正确/)
-})
-
-test('normalizes CIDR networks to the firewall subnet format supported by Windows 7', () => {
+test('normalizes room CIDR for netsh on Windows 7 through Windows 11', () => {
   assert.equal(cidrToFirewallSubnet('10.222.1.123/24'), '10.222.1.0/255.255.255.0')
   assert.equal(cidrToFirewallSubnet('10.222.1.10/32'), '10.222.1.10/255.255.255.255')
+  assert.throws(() => cidrToFirewallSubnet('not-a-subnet'), /房间子网格式不正确/)
+  assert.throws(() => cidrToFirewallSubnet('10.222.999.0/24'), /房间子网格式不正确/)
 })
 
-test('rejects an empty firewall program path', () => {
-  assert.throws(() => buildWe8FirewallScript(''), /防火墙程序路径为空/)
+test('passes room and exact WE8 paths to the native firewall helper', () => {
+  assert.deepEqual(buildRoomFirewallArgs('C:\\Program Files\\WEL\\edge.exe', '10.222.1.10/24'), [
+    '--subnet', '10.222.1.0/255.255.255.0', '--edge', 'C:\\Program Files\\WEL\\edge.exe',
+  ])
+  assert.deepEqual(buildWe8FirewallArgs('D:\\Games\\WE8.exe'), ['--game', 'D:\\Games\\WE8.exe'])
+  assert.throws(() => buildRoomFirewallArgs('', '10.222.1.0/24'), /组件路径为空/)
+  assert.throws(() => buildWe8FirewallArgs(''), /程序路径为空/)
+  assert.equal(WEL_ROOM_FIREWALL_SUBNET_CIDR, '10.222.0.0/16')
+  assert.equal(FIREWALL_RULE_VERSION, 3)
 })
 
-test('uses a dedicated native firewall authorization helper on Windows 7', () => {
-  assert.equal(isWindows7('6.1.7601'), true)
-  assert.equal(isWindows7('10.0.19045'), false)
+test('uses the bundled native helper without requiring PowerShell', () => {
+  const source = fs.readFileSync(path.join(__dirname, 'firewall.cjs'), 'utf8')
   assert.ok(firewallHelperCandidates().some((candidate) => candidate.endsWith('welfirewall.exe')))
+  assert.doesNotMatch(source, /runPowerShell|EncodedCommand|HNetCfg/)
   assert.match(firewallHelperExitReason(10), /用户取消/)
   assert.match(firewallHelperExitReason(12), /规则写入失败/)
-  assert.equal(WEL_ROOM_FIREWALL_SUBNET_CIDR, '10.222.0.0/16')
-  assert.equal(WIN7_FIREWALL_RULE_VERSION, 2)
-  assert.equal(normalizeFirewallProgramPath('D:/WEL/welhelper/EDGE.exe'), 'd:\\wel\\welhelper\\edge.exe')
-  assert.equal(win7FirewallRulesPresent('D:/WEL/welhelper/edge.exe'), false)
 })
 
-test('uses ShellExecute UAC and netsh inside the native Windows 7 helper', () => {
+test('native helper repairs exact-path WE8 blocks and installs broad room rules', () => {
   const source = fs.readFileSync(path.join(__dirname, '..', '..', 'native', 'wel-firewall', 'wel_firewall.c'), 'utf8')
   assert.match(source, /ShellExecuteExW/)
   assert.match(source, /lpVerb = L"runas"/)
+  assert.match(source, /is_process_elevated/)
   assert.match(source, /netsh\.exe/)
+  assert.match(source, /delete rule name=all dir=in program=/)
+  assert.match(source, /WEL WE8 inbound/)
+  assert.match(source, /protocol=any enable=yes profile=any/)
+  assert.match(source, /WEL n2n edge inbound/)
   assert.match(source, /remoteip=%ls/)
   assert.match(source, /icmpv4:any,any/)
   assert.match(source, /WEL room UDP inbound/)
-})
-
-test('verifies that Windows actually retained every required firewall rule', () => {
-  const script = buildFirewallRuleCheckScript([ROOM_UDP_INBOUND_RULE, ROOM_ICMP_INBOUND_RULE])
-  assert.match(script, /HNetCfg\.FwPolicy2/)
-  assert.match(script, /\$rule\.Enabled/)
-  assert.match(script, /\$rule\.Action -eq 1/)
 })

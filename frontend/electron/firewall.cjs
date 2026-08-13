@@ -1,7 +1,6 @@
 const fs = require('node:fs')
-const os = require('node:os')
 const path = require('node:path')
-const { runPowerShell, runProcess } = require('./network.cjs')
+const { runProcess } = require('./network.cjs')
 
 const EDGE_INBOUND_RULE = 'WEL n2n edge inbound'
 const WE8_INBOUND_RULE = 'WEL WE8 inbound'
@@ -9,34 +8,8 @@ const ROOM_UDP_INBOUND_RULE = 'WEL room UDP inbound'
 const ROOM_UDP_OUTBOUND_RULE = 'WEL room UDP outbound'
 const ROOM_ICMP_INBOUND_RULE = 'WEL room ICMPv4 inbound'
 const ROOM_ICMP_OUTBOUND_RULE = 'WEL room ICMPv4 outbound'
-const LEGACY_GAME_DISCOVERY_RULE = 'WEL game discovery UDP 5739 inbound'
-const LEGACY_WE8_RULES = [
-  'WEL WE8 UDP 5739 Inbound',
-  'WEL WE8 UDP 5739 Outbound',
-  'WEL WE8 UDP 5739 Reply Inbound',
-  'WEL WE8 UDP 5739 Reply Outbound',
-  'WEL WE8 Broadcast Outbound',
-  'WEL WE8 Game Broadcast Outbound',
-  'WEL WE8 Game Inbound',
-  'WEL WE8 Game Outbound',
-]
-const LEGACY_TAP_RULES = [
-  'WEL TAP UDP Any Inbound',
-  'WEL TAP UDP Any Outbound',
-  'WEL TAP UDP Inbound',
-  'WEL TAP UDP Outbound',
-]
 const WEL_ROOM_FIREWALL_SUBNET_CIDR = '10.222.0.0/16'
-const WIN7_FIREWALL_RULE_VERSION = 2
-const WIN7_FIREWALL_STATE_PATH = path.join(
-  process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local'),
-  'WELPlatform',
-  'firewall-rules.json',
-)
-
-function isWindows7(release = os.release()) {
-  return /^6\.1(?:\.|$)/.test(String(release || ''))
-}
+const FIREWALL_RULE_VERSION = 3
 
 function firewallHelperCandidates() {
   return [
@@ -56,53 +29,6 @@ function firewallHelperExitReason(code) {
   return `Windows 防火墙授权程序退出（代码 ${code ?? '未知'}）`
 }
 
-function normalizeFirewallProgramPath(programPath) {
-  return String(programPath || '').trim().replace(/\//g, '\\').toLowerCase()
-}
-
-function win7FirewallRulesPresent(edgePath) {
-  try {
-    const state = JSON.parse(fs.readFileSync(WIN7_FIREWALL_STATE_PATH, 'utf8'))
-    return state.version === WIN7_FIREWALL_RULE_VERSION &&
-      state.edgePath === normalizeFirewallProgramPath(edgePath)
-  } catch {
-    return false
-  }
-}
-
-function rememberWin7FirewallRules(edgePath) {
-  try {
-    fs.mkdirSync(path.dirname(WIN7_FIREWALL_STATE_PATH), { recursive: true })
-    fs.writeFileSync(WIN7_FIREWALL_STATE_PATH, JSON.stringify({
-      version: WIN7_FIREWALL_RULE_VERSION,
-      edgePath: normalizeFirewallProgramPath(edgePath),
-    }), 'utf8')
-  } catch {
-    // The firewall rules are already active; a later room entry can retry
-    // persisting the marker without interrupting the connection.
-  }
-}
-
-async function ensureWin7RoomFirewall(edgePath) {
-  if (process.platform !== 'win32') return false
-  const helper = locateFirewallHelper()
-  if (!helper) throw new Error('未找到 Windows 7 防火墙授权组件，请安装最新完整客户端')
-  const subnet = cidrToFirewallSubnet(WEL_ROOM_FIREWALL_SUBNET_CIDR)
-  try {
-    await runProcess(helper, ['--subnet', subnet, '--edge', edgePath], 45000)
-  } catch (error) {
-    const match = /退出代码\s+(-?\d+)/.exec(String(error?.message || ''))
-    if (match) throw new Error(firewallHelperExitReason(Number(match[1])))
-    throw new Error(`Windows 防火墙授权失败：${error.message}`)
-  }
-  rememberWin7FirewallRules(edgePath)
-  return true
-}
-
-function escapePowerShellSingleQuoted(value) {
-  return String(value || '').replace(/'/g, "''")
-}
-
 function cidrToFirewallSubnet(subnetCidr) {
   const match = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})\/(\d|[12]\d|3[0-2])$/.exec(String(subnetCidr || '').trim())
   if (!match) throw new Error('WEL 房间子网格式不正确')
@@ -119,167 +45,65 @@ function cidrToFirewallSubnet(subnetCidr) {
   return `${network.join('.')}/${mask.join('.')}`
 }
 
-function buildProgramInboundFirewallScript(ruleName, description, programPath, legacyRuleNames = []) {
+function buildRoomFirewallArgs(edgePath, subnetCidr = WEL_ROOM_FIREWALL_SUBNET_CIDR) {
+  const normalizedEdgePath = String(edgePath || '').trim()
+  if (!normalizedEdgePath) throw new Error('n2n 联机组件路径为空')
+  return ['--subnet', cidrToFirewallSubnet(subnetCidr), '--edge', normalizedEdgePath]
+}
+
+function buildWe8FirewallArgs(programPath) {
   const normalizedPath = String(programPath || '').trim()
   if (!normalizedPath) throw new Error('防火墙程序路径为空')
-
-  const ruleNames = [ruleName, ...legacyRuleNames]
-  const powershellRuleNames = ruleNames.map((name) => `'${escapePowerShellSingleQuoted(name)}'`).join(', ')
-
-  return `
-$ErrorActionPreference = 'Stop'
-$programPath = '${escapePowerShellSingleQuoted(normalizedPath)}'
-$policy = New-Object -ComObject HNetCfg.FwPolicy2
-$ruleNames = @(${powershellRuleNames})
-foreach ($ruleName in $ruleNames) {
-  try { $policy.Rules.Remove($ruleName) } catch {}
+  return ['--game', normalizedPath]
 }
 
-$rule = New-Object -ComObject HNetCfg.FWRule
-$rule.Name = '${escapePowerShellSingleQuoted(ruleName)}'
-$rule.Description = '${escapePowerShellSingleQuoted(description)}'
-$rule.ApplicationName = $programPath
-$rule.Protocol = 256
-$rule.Direction = 1
-$rule.Action = 1
-$rule.Enabled = $true
-$rule.Profiles = 2147483647
-$policy.Rules.Add($rule)
-`
-}
-
-function buildEdgeFirewallScript(programPath) {
-  return buildProgramInboundFirewallScript(
-    EDGE_INBOUND_RULE,
-    'Allow WEL n2n edge inbound traffic.',
-    programPath,
-    [...LEGACY_TAP_RULES],
-  )
-}
-
-function buildWe8FirewallScript(programPath) {
-  return buildProgramInboundFirewallScript(
-    WE8_INBOUND_RULE,
-    'Allow WEL WE8 inbound discovery and game traffic.',
-    programPath,
-    LEGACY_WE8_RULES,
-  )
-}
-
-function buildRoomUdpFirewallScript(subnetCidr) {
-  const subnet = cidrToFirewallSubnet(subnetCidr)
-  return `
-$ErrorActionPreference = 'Stop'
-$policy = New-Object -ComObject HNetCfg.FwPolicy2
-$ruleNames = @(
-  '${LEGACY_GAME_DISCOVERY_RULE}',
-  '${ROOM_UDP_INBOUND_RULE}',
-  '${ROOM_UDP_OUTBOUND_RULE}',
-  '${ROOM_ICMP_INBOUND_RULE}',
-  '${ROOM_ICMP_OUTBOUND_RULE}'
-)
-foreach ($ruleName in $ruleNames) {
-  try { $policy.Rules.Remove($ruleName) } catch {}
-}
-$ruleDefinitions = @(
-  @{ Name = '${ROOM_UDP_INBOUND_RULE}'; Protocol = 17; Direction = 1; Description = 'Allow inbound UDP traffic from the active WEL virtual room subnet.' },
-  @{ Name = '${ROOM_UDP_OUTBOUND_RULE}'; Protocol = 17; Direction = 2; Description = 'Allow outbound UDP traffic to the active WEL virtual room subnet.' },
-  @{ Name = '${ROOM_ICMP_INBOUND_RULE}'; Protocol = 1; Direction = 1; Description = 'Allow inbound ICMPv4 traffic from the active WEL virtual room subnet.' },
-  @{ Name = '${ROOM_ICMP_OUTBOUND_RULE}'; Protocol = 1; Direction = 2; Description = 'Allow outbound ICMPv4 traffic to the active WEL virtual room subnet.' }
-)
-foreach ($definition in $ruleDefinitions) {
-  $rule = New-Object -ComObject HNetCfg.FWRule
-  $rule.Name = $definition.Name
-  $rule.Description = $definition.Description
-  $rule.Protocol = $definition.Protocol
-  $rule.RemoteAddresses = '${escapePowerShellSingleQuoted(subnet)}'
-  $rule.Direction = $definition.Direction
-  $rule.Action = 1
-  $rule.Enabled = $true
-  $rule.Profiles = 2147483647
-  $policy.Rules.Add($rule)
-}
-`
-}
-
-function buildFirewallRuleCheckScript(ruleNames) {
-  const powershellRuleNames = ruleNames.map((name) => `'${escapePowerShellSingleQuoted(name)}'`).join(', ')
-  return `
-$ErrorActionPreference = 'Stop'
-$policy = New-Object -ComObject HNetCfg.FwPolicy2
-$ruleNames = @(${powershellRuleNames})
-foreach ($ruleName in $ruleNames) {
+async function runFirewallHelper(args) {
+  if (process.platform !== 'win32') return false
+  const helper = locateFirewallHelper()
+  if (!helper) throw new Error('未找到 Windows 防火墙授权组件，请安装最新完整客户端')
   try {
-    $rule = $policy.Rules.Item($ruleName)
-    if ($null -ne $rule -and $rule.Enabled -and $rule.Action -eq 1) {
-      [Console]::Out.WriteLine($ruleName)
-    }
-  } catch {}
-}
-`
-}
-
-async function firewallRulesExist(ruleNames) {
-  const output = await runPowerShell(buildFirewallRuleCheckScript(ruleNames), 12000)
-  const found = new Set(String(output || '').split(/\r?\n/).map((line) => line.trim()).filter(Boolean))
-  return ruleNames.every((name) => found.has(name))
-}
-
-async function ensureFirewallRules(primaryScript, ruleNames) {
-  await runPowerShell(primaryScript, 12000)
-  if (!await firewallRulesExist(ruleNames)) {
-    throw new Error(`Windows 防火墙规则创建失败：${ruleNames.join('、')}`)
+    await runProcess(helper, args, 45000)
+  } catch (error) {
+    const match = /退出代码\s+(-?\d+)/.exec(String(error?.message || ''))
+    if (match) throw new Error(firewallHelperExitReason(Number(match[1])))
+    throw new Error(`Windows 防火墙授权失败：${error.message}`)
   }
   return true
 }
 
+async function ensureRoomFirewall(edgePath, subnetCidr = WEL_ROOM_FIREWALL_SUBNET_CIDR) {
+  return runFirewallHelper(buildRoomFirewallArgs(edgePath, subnetCidr))
+}
+
 async function ensureEdgeFirewall(programPath) {
-  if (process.platform !== 'win32') return false
-  return ensureFirewallRules(
-    buildEdgeFirewallScript(programPath),
-    [EDGE_INBOUND_RULE],
-  )
+  return ensureRoomFirewall(programPath)
+}
+
+async function ensureRoomUdpFirewall(subnetCidr, edgePath) {
+  return ensureRoomFirewall(edgePath, subnetCidr)
 }
 
 async function ensureWe8Firewall(programPath) {
-  if (process.platform !== 'win32') return false
-  return ensureFirewallRules(
-    buildWe8FirewallScript(programPath),
-    [WE8_INBOUND_RULE],
-  )
-}
-
-async function ensureRoomUdpFirewall(subnetCidr) {
-  if (process.platform !== 'win32') return false
-  const requiredRules = [ROOM_UDP_INBOUND_RULE, ROOM_UDP_OUTBOUND_RULE, ROOM_ICMP_INBOUND_RULE, ROOM_ICMP_OUTBOUND_RULE]
-  return ensureFirewallRules(buildRoomUdpFirewallScript(subnetCidr), requiredRules)
+  return runFirewallHelper(buildWe8FirewallArgs(programPath))
 }
 
 module.exports = {
-  LEGACY_WE8_RULES,
   EDGE_INBOUND_RULE,
-  LEGACY_GAME_DISCOVERY_RULE,
-  ROOM_UDP_INBOUND_RULE,
-  ROOM_UDP_OUTBOUND_RULE,
+  FIREWALL_RULE_VERSION,
   ROOM_ICMP_INBOUND_RULE,
   ROOM_ICMP_OUTBOUND_RULE,
+  ROOM_UDP_INBOUND_RULE,
+  ROOM_UDP_OUTBOUND_RULE,
   WE8_INBOUND_RULE,
-  buildEdgeFirewallScript,
-  buildFirewallRuleCheckScript,
-  buildRoomUdpFirewallScript,
-  buildWe8FirewallScript,
-  buildProgramInboundFirewallScript,
+  WEL_ROOM_FIREWALL_SUBNET_CIDR,
+  buildRoomFirewallArgs,
+  buildWe8FirewallArgs,
   cidrToFirewallSubnet,
   ensureEdgeFirewall,
+  ensureRoomFirewall,
   ensureRoomUdpFirewall,
-  ensureWin7RoomFirewall,
   ensureWe8Firewall,
   firewallHelperCandidates,
   firewallHelperExitReason,
-  isWindows7,
   locateFirewallHelper,
-  normalizeFirewallProgramPath,
-  WEL_ROOM_FIREWALL_SUBNET_CIDR,
-  WIN7_FIREWALL_RULE_VERSION,
-  win7FirewallRulesPresent,
 }

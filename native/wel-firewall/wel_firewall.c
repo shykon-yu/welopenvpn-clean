@@ -14,6 +14,7 @@
 typedef struct {
     const wchar_t *subnet;
     const wchar_t *edge_path;
+    const wchar_t *game_path;
     int elevated;
     int self_test;
 } wel_firewall_options;
@@ -36,10 +37,23 @@ static int parse_options(int argc, wchar_t **argv, wel_firewall_options *options
         else if (wcscmp(argv[index], L"--self-test") == 0) options->self_test = 1;
         else if (wcscmp(argv[index], L"--subnet") == 0 && index + 1 < argc) options->subnet = argv[++index];
         else if (wcscmp(argv[index], L"--edge") == 0 && index + 1 < argc) options->edge_path = argv[++index];
+        else if (wcscmp(argv[index], L"--game") == 0 && index + 1 < argc) options->game_path = argv[++index];
         else return 0;
     }
     if (options->self_test) return 1;
+    if (options->game_path != NULL && *options->game_path != L'\0') return 1;
     return valid_subnet(options->subnet) && options->edge_path != NULL && *options->edge_path != L'\0';
+}
+
+static int is_process_elevated(void) {
+    SID_IDENTIFIER_AUTHORITY authority = SECURITY_NT_AUTHORITY;
+    PSID administrators = NULL;
+    BOOL is_member = FALSE;
+    if (!AllocateAndInitializeSid(&authority, 2, SECURITY_BUILTIN_DOMAIN_RID,
+        DOMAIN_ALIAS_RID_ADMINS, 0, 0, 0, 0, 0, 0, &administrators)) return 0;
+    CheckTokenMembership(NULL, administrators, &is_member);
+    FreeSid(administrators);
+    return is_member ? 1 : 0;
 }
 
 static int run_netsh(const wchar_t *arguments) {
@@ -116,6 +130,28 @@ static int add_room_rules(const wel_firewall_options *options) {
     return run_netsh(command);
 }
 
+static int add_game_rule(const wel_firewall_options *options) {
+    wchar_t command[4096];
+
+    if (options->game_path == NULL || *options->game_path == L'\0') return 1;
+
+    /* Reset only rules attached to this exact executable. This removes a
+       previous "Block" choice, which otherwise overrides every Allow rule. */
+    _snwprintf_s(command, ARRAYSIZE(command), _TRUNCATE,
+        L"advfirewall firewall delete rule name=all dir=in program=\"%ls\"", options->game_path);
+    run_netsh(command);
+
+    _snwprintf_s(command, ARRAYSIZE(command), _TRUNCATE,
+        L"advfirewall firewall add rule name=\"WEL WE8 inbound\" dir=in action=allow program=\"%ls\" protocol=any enable=yes profile=any",
+        options->game_path);
+    return run_netsh(command);
+}
+
+static int apply_rules(const wel_firewall_options *options) {
+    if (options->subnet != NULL && options->edge_path != NULL && !add_room_rules(options)) return 0;
+    return add_game_rule(options);
+}
+
 static int elevate_self(const wel_firewall_options *options) {
     wchar_t executable[MAX_PATH];
     wchar_t parameters[4096];
@@ -123,9 +159,18 @@ static int elevate_self(const wel_firewall_options *options) {
     DWORD exit_code = WEL_FIREWALL_ELEVATION_FAILED;
 
     if (GetModuleFileNameW(NULL, executable, ARRAYSIZE(executable)) == 0) return WEL_FIREWALL_ELEVATION_FAILED;
-    if (_snwprintf_s(parameters, ARRAYSIZE(parameters), _TRUNCATE,
-        L"--elevated --subnet \"%ls\" --edge \"%ls\"", options->subnet, options->edge_path) < 0) {
-        return WEL_FIREWALL_INVALID_ARGUMENTS;
+    if (options->game_path != NULL && options->subnet != NULL && options->edge_path != NULL) {
+        if (_snwprintf_s(parameters, ARRAYSIZE(parameters), _TRUNCATE,
+            L"--elevated --subnet \"%ls\" --edge \"%ls\" --game \"%ls\"",
+            options->subnet, options->edge_path, options->game_path) < 0) return WEL_FIREWALL_INVALID_ARGUMENTS;
+    } else if (options->game_path != NULL) {
+        if (_snwprintf_s(parameters, ARRAYSIZE(parameters), _TRUNCATE,
+            L"--elevated --game \"%ls\"", options->game_path) < 0) return WEL_FIREWALL_INVALID_ARGUMENTS;
+    } else {
+        if (_snwprintf_s(parameters, ARRAYSIZE(parameters), _TRUNCATE,
+            L"--elevated --subnet \"%ls\" --edge \"%ls\"", options->subnet, options->edge_path) < 0) {
+            return WEL_FIREWALL_INVALID_ARGUMENTS;
+        }
     }
 
     ZeroMemory(&execute, sizeof(execute));
@@ -167,7 +212,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
         LocalFree(argv);
         return WEL_FIREWALL_SUCCESS;
     }
-    result = options.elevated ? (add_room_rules(&options) ? WEL_FIREWALL_SUCCESS : WEL_FIREWALL_NETSH_FAILED)
+    result = (options.elevated || is_process_elevated())
+        ? (apply_rules(&options) ? WEL_FIREWALL_SUCCESS : WEL_FIREWALL_NETSH_FAILED)
         : elevate_self(&options);
     LocalFree(argv);
     return result;

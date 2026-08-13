@@ -3,7 +3,7 @@ const os = require('node:os')
 const path = require('node:path')
 const { spawn } = require('node:child_process')
 const { formatProcessExitCode, inspectVpnNetwork, runPowerShell, runProcess, waitForVpnNetwork } = require('./network.cjs')
-const { ensureEdgeFirewall, ensureRoomUdpFirewall, ensureWin7RoomFirewall, isWindows7, win7FirewallRulesPresent } = require('./firewall.cjs')
+const { ensureRoomFirewall } = require('./firewall.cjs')
 
 const DEFAULT_HOST = '8.155.145.132'
 const DEFAULT_PORT = 22222
@@ -705,7 +705,7 @@ async function connectAttempt({ executable, host, port, roomID, username, subnet
   }
 }
 
-async function connect({ host, port, roomID, username, subnetCidr, virtualIP, community, transportKey, requestFirewallAccess }) {
+async function connect({ host, port, roomID, username, subnetCidr, virtualIP, community, transportKey }) {
   const executable = locateEdge()
   if (!executable) throw new Error('未检测到 n2n 联机组件 edge.exe，请重新运行完整安装包')
   if (!username || !roomID || !subnetCidr) throw new Error('n2n 房间凭据不完整')
@@ -717,19 +717,7 @@ async function connect({ host, port, roomID, username, subnetCidr, virtualIP, co
   const prepared = await prepare()
   const tapNode = prepared.tapNode
   const transportBindIP = await findBestTransportIPv4(host || DEFAULT_HOST)
-  if (isWindows7()) {
-    if (!win7FirewallRulesPresent(executable)) {
-      if (typeof requestFirewallAccess === 'function') await requestFirewallAccess()
-      await ensureWin7RoomFirewall(executable)
-    }
-  } else {
-    try {
-      await ensureEdgeFirewall(executable)
-    } catch {
-      // Other Windows versions can keep the normal firewall confirmation flow.
-    }
-    await ensureRoomUdpFirewall(subnetCidr)
-  }
+  await ensureRoomFirewall(executable, subnetCidr)
 
   let lastError = null
   for (let attempt = 1; attempt <= CONNECT_MAX_ATTEMPTS; attempt += 1) {

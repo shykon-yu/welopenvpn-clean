@@ -32,9 +32,8 @@ test('starts WE8 through the TAP socket-binding launcher only after room connect
   assert.doesNotMatch(client, /cmd\.exe'.*start/)
 })
 
-test('asks users before requesting native firewall authorization when Win7 rules are missing', () => {
-  assert.match(client, /requestFirewallAccess/)
-  assert.match(client, /需要 Windows 防火墙授权/)
-  assert.match(client, /允许并进入/)
-  assert.match(client, /result\.response !== 0/)
+test('repairs WE8 firewall rules before launching the game on every Windows version', () => {
+  assert.match(client, /await ensureWe8Firewall\(executable\)/)
+  assert.match(client, /await ensureWe8Firewall\(executable\)[\s\S]*await launchGameBound\(executable, network\)/)
+  assert.doesNotMatch(client, /if \(!isWindows7\(\)\)/)
 })

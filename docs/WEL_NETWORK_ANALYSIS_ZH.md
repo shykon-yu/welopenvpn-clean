@@ -486,7 +486,14 @@ Hook 仅在目标同时满足“IPv4、端口 `5739`、地址为全局广播”�
 - 对 WE8 精确程序路径放行入站。
 - 对房间虚拟网段放行 ICMPv4，便于 Ping 与基础诊断。
 
-### 7.2 Windows 10/11 当前规则
+### 7.2 Windows 7/10/11 统一规则（v0.0.3）
+
+`v0.0.3` 不再使用 PowerShell COM 创建或验证防火墙规则。所有支持的 Windows 版本统一调用原生 `welfirewall.exe`，由它使用系统 `netsh advfirewall` 写入规则：
+
+1. 平台进程已有管理员权限时直接执行，不显示额外窗口。
+2. 绿色环境权限不足时，辅助程序通过系统 `runas` 请求 UAC。
+3. 不再依赖 `EncodedCommand`、PowerShell 模块初始化或 `HNetCfg.FwPolicy2`。
+4. 因 PowerShell 被安全软件终止而产生的退出代码 `-1 (0xFFFFFFFF)` 不再阻塞进入房间。
 
 进入房间时创建：
 
@@ -506,39 +513,24 @@ Hook 仅在目标同时满足“IPv4、端口 `5739`、地址为全局广播”�
 
 `WEL WE8 inbound` 使用精确程序路径。玩家换了另一个 WE8 目录后，应以新路径重建规则。
 
-### 7.3 Windows 7 当前规则
+### 7.3 WE8 显式 Block 冲突修复（v0.0.3）
 
-Windows 7 不走新版 PowerShell COM 规则路径，而是调用原生 `welfirewall.exe`：
+Windows 防火墙中，同一程序同时存在 Allow 与 Block 时，显式 Block 优先。仅增加 `WEL WE8 inbound` 无法覆盖玩家以前在系统联网提示中选择“不允许访问”产生的规则。
 
-1. 普通权限启动辅助程序。
-2. 辅助程序通过 `runas` 请求 UAC。
-3. 提权后使用系统 `netsh advfirewall` 写规则。
-4. 规则成功后在 `%LOCALAPPDATA%\WELPlatform\firewall-rules.json` 写入版本和 edge 路径标记。
-5. 标记匹配时后续进房不重复弹 UAC。
+因此每次通过平台启动游戏前，原生助手执行以下精确修复：
 
-Windows 7 当前使用较宽的 WEL 总房间网段：
+1. 只匹配当前选择的 `WE8.exe` 完整路径。
+2. 只删除该路径的入站规则，不修改其出站规则。
+3. 重新创建 `WEL WE8 inbound`：入站、任意协议、任意端口、Domain/Private/Public 全部允许。
+4. 不删除其他 WE8 目录、其他游戏或其他程序的规则。
 
-```text
-10.222.0.0/16
-```
-
-创建：
-
-| 规则名 | 方向 | 协议 | 远端地址 | 端口 | 配置文件 |
-|---|---|---|---|---|---|
-| `WEL n2n edge inbound` | 入站 | 任意 | 任意 | 任意 | 全部 |
-| `WEL room UDP inbound` | 入站 | UDP | `10.222.0.0/16` | 任意 | 全部 |
-| `WEL room UDP outbound` | 出站 | UDP | `10.222.0.0/16` | 任意 | 全部 |
-| `WEL room ICMPv4 inbound` | 入站 | ICMPv4 | `10.222.0.0/16` | 任意 | 全部 |
-| `WEL room ICMPv4 outbound` | 出站 | ICMPv4 | `10.222.0.0/16` | 任意 | 全部 |
-
-Windows 7 不依赖 `WEL WE8 inbound`，因为房间网段 UDP 任意端口规则已经覆盖 WE8 的搜索、回复和正式联机。
+这覆盖“同一个 WE8 在其他平台可用，但 WEL 标准 TAP 到 Socket 路径被历史 Block 规则拦截”的情况。
 
 ### 7.4 规则设计的安全边界
 
 这些规则不是全系统对互联网开放全部 UDP：
 
-- 房间 UDP/ICMP 规则的远端地址限制在 `10.222.0.0/16` 或当前 `/24`。
+- 房间 UDP/ICMP 规则的远端地址限制在当前房间 `/24`。
 - `edge.exe` 入站规则只匹配打包的 edge 程序路径。
 - WE8 入站规则只匹配玩家选择的游戏程序路径。
 - 所有规则覆盖域、专用、公用配置文件，避免 TAP 被 Windows 识别为 Public 后失效。
@@ -556,7 +548,7 @@ Windows 7 不依赖 `WEL WE8 inbound`，因为房间网段 UDP 任意端口规�
 7. 本地规则未被域 GPO 禁止。
 8. 没有第三方安全软件在 Windows 防火墙之外继续拦截。
 
-Windows 7 的本地标记表示“此前辅助程序报告规则写入成功”，不是对系统规则的实时证明。玩家手动删规则或被安全软件清理后，标记可能仍存在；此时应删除标记或提供平台内“修复防火墙规则”功能重新写入。
+规则会在进入房间或启动游戏时重新写入，不依赖本地状态标记。若域 GPO 禁止本地规则或第三方安全软件独立拦截，`netsh` 规则成功仍不能覆盖该外部策略。
 
 ## 8. 成功联机逐包分析
 
@@ -1019,7 +1011,7 @@ WSAWaitForMultipleEvents
 4. 搜索广播目标使用当前房间定向广播地址。
 5. 主机 `5739` 和客机随机端口双向可达。
 6. 防火墙规则覆盖 Public、随机 UDP 端口和 ICMP 诊断。
-7. Windows 7 不使用不兼容的新版 COM 属性。
+7. Windows 7/10/11 防火墙配置不依赖 PowerShell COM。
 8. TAP 通过 GUID 识别，不依赖中文/英文显示名称。
 9. 路由只覆盖房间网段，不增加 TAP 默认路由。
 10. Hook 必须在 WE8 恢复运行前确认初始化成功。
@@ -1031,8 +1023,8 @@ WSAWaitForMultipleEvents
 | 功能 | 当前代码位置 |
 |---|---|
 | TAP 检测、edge 启动、物理出口、路由 | `frontend/electron/openvpn.cjs` |
-| 防火墙规则与 Win7 分支 | `frontend/electron/firewall.cjs` |
-| Win7 原生提权/netsh 辅助程序 | `native/wel-firewall/wel_firewall.c` |
+| 防火墙参数与原生助手调用 | `frontend/electron/firewall.cjs` |
+| Win7/10/11 原生提权/netsh 辅助程序 | `native/wel-firewall/wel_firewall.c` |
 | WE8 启动参数与房间广播计算 | `frontend/electron/game-launch.cjs` |
 | 暂停启动、DLL 注入、就绪握手 | `native/wel-game/wel_game_launcher.c` |
 | UDP bind、sendto、WSASendTo Hook | `native/wel-game/wel_game_hook.c` |
