@@ -158,6 +158,8 @@ static void run_snapshot_command(const wchar_t *file_name, const wchar_t *comman
     run_command(command, g_session.work_directory, output, 30000);
 }
 
+static void write_utf8_line(FILE *file, const wchar_t *text);
+
 static int process_is_elevated(void) {
     HANDLE token;
     TOKEN_ELEVATION elevation;
@@ -178,9 +180,10 @@ static void write_pktmon_service_log(const wchar_t *stage, DWORD error_code, DWO
     SYSTEMTIME now;
     wchar_t error_text[256] = L"";
     DWORD flags = FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS;
+    DWORD index;
     if (error_code != ERROR_SUCCESS) {
         FormatMessageW(flags, NULL, error_code, 0, error_text, ARRAYSIZE(error_text), NULL);
-        for (DWORD index = 0; error_text[index] != L'\0'; ++index) {
+        for (index = 0; error_text[index] != L'\0'; ++index) {
             if (error_text[index] == L'\r' || error_text[index] == L'\n') error_text[index] = L' ';
         }
     }
