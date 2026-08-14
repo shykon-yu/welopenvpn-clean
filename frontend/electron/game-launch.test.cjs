@@ -44,6 +44,13 @@ test('locates the paired 32-bit launcher and hook runtime', () => {
   assert.match(gameRuntimeCandidates()[0], /welhelper[\\/]game-runtime$/)
 })
 
+test('keeps TAP binding optional when Windows has no usable interface index', async () => {
+  const source = fs.readFileSync(path.join(__dirname, 'game-launch.cjs'), 'utf8')
+  assert.match(source, /interfaceIndex > 0/)
+  assert.match(source, /广播改写已启用/)
+  assert.match(source, /resolve\(\{ detail, warnings \}\)/)
+})
+
 test('hooks WE8 UDP sockets before rewriting discovery destinations', () => {
   const hook = fs.readFileSync(path.join(__dirname, '..', '..', 'native', 'wel-game', 'wel_game_hook.c'), 'utf8')
   const launcher = fs.readFileSync(path.join(__dirname, '..', '..', 'native', 'wel-game', 'wel_game_launcher.c'), 'utf8')

@@ -22,6 +22,7 @@ const roomMembers = ref<RoomMember[]>([])
 const networkStatus = ref<DesktopLeaseStatus | null>(null)
 const loading = ref(false)
 const errorMessage = ref('')
+const warningMessage = ref('')
 const notice = ref('')
 const desktopStatus = ref<DesktopStatus | null>(null)
 const pingResults = ref<Record<number, PingResult | undefined>>({})
@@ -97,6 +98,7 @@ function clearRoomSessionState() {
   networkStatus.value = null
   pingResults.value = {}
   selectedMemberId.value = null
+  warningMessage.value = ''
 }
 
 async function loadRoomMembers() {
@@ -254,6 +256,7 @@ function connectDesktopVpn(lease: Lease) {
 async function joinRoom(room: Room) {
   loading.value = true
   errorMessage.value = ''
+  warningMessage.value = ''
   let lease: Lease | null = null
   try {
     if (desktop() && !(await ensureDesktopReady())) return
@@ -262,6 +265,7 @@ async function joinRoom(room: Room) {
     if (desktop()) {
       networkStatus.value = await connectDesktopVpn(lease)
       updateActiveLeaseIP(networkStatus.value.actualIp)
+      warningMessage.value = (networkStatus.value.warnings || []).join('\n')
     }
     startLeaseHeartbeat()
     startRoomMembersMonitor()
@@ -338,7 +342,9 @@ async function launchGame() {
   if (!desktop()) { notice.value = '浏览器预览不会启动本机程序，请在 Windows 客户端测试'; return }
   loading.value = true
   try {
-    await desktop()!.launchGame(gamePath.value)
+    const result = await desktop()!.launchGame(gamePath.value)
+    const warnings = [...(networkStatus.value?.warnings || []), ...(result.warnings || [])]
+    warningMessage.value = [...new Set(warnings)].join('\n')
     notice.value = '已启动 WE8'
   } catch (error) {
     errorMessage.value = messageOf(error)
@@ -450,7 +456,7 @@ onBeforeUnmount(() => {
       </section>
       <header class="topbar"><div><p class="eyebrow">游戏大厅</p><h2>选择一个对战房间</h2></div><div class="topbar-actions"><div class="online"><span></span>{{ totalOnline }} 人在线</div></div></header>
       <section v-if="desktop()" class="game-path-panel"><div><p class="eyebrow">当前游戏路径</p><span :class="['game-path', { empty: !gamePath.trim() }]">{{ gamePathLabel }}</span></div><button class="secondary-button" @click="chooseGame"><FolderOpen :size="17" /> 选择游戏</button></section>
-      <p v-if="errorMessage" class="banner error">{{ errorMessage }}</p><p v-if="notice" class="banner notice">{{ notice }}</p>
+      <p v-if="errorMessage" class="banner error">{{ errorMessage }}</p><p v-if="warningMessage" class="banner warning">{{ warningMessage }}</p><p v-if="notice" class="banner notice">{{ notice }}</p>
 
       <section class="connection-strip room-status-strip" :class="{ connected: activeLease }">
         <div><p class="eyebrow">房间信息</p><h3>{{ roomInfoTitle }}</h3><span><Router :size="15" /> {{ roomInfoSubtitle }}</span></div>

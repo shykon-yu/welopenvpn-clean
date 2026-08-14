@@ -33,7 +33,8 @@ test('starts WE8 through the TAP socket-binding launcher only after room connect
 })
 
 test('repairs WE8 firewall rules before launching the game on every Windows version', () => {
-  assert.match(client, /await ensureWe8Firewall\(executable\)/)
-  assert.match(client, /await ensureWe8Firewall\(executable\)[\s\S]*await launchGameBound\(executable, network\)/)
+  assert.match(client, /const firewall = await ensureWe8Firewall\(executable\)/)
+  assert.match(client, /ensureWe8Firewall\(executable\)[\s\S]*await launchGameBound\(executable, network\)/)
+  assert.match(client, /firewall\.warnings[\s\S]*launch\.warnings/)
   assert.doesNotMatch(client, /if \(!isWindows7\(\)\)/)
 })

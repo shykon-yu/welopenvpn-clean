@@ -19,6 +19,7 @@ export type DesktopLeaseStatus = {
   interfaceIndex: number | null
   macAddress: string | null
   nicName?: string
+  warnings?: string[]
 }
 
 export type DesktopStatus = {
@@ -35,6 +36,12 @@ export type PingResult = {
   summary: string
 }
 
+export type GameLaunchResult = {
+  started: boolean
+  detail: string
+  warnings: string[]
+}
+
 declare global {
   interface Window {
     wrhDesktop?: {
@@ -46,7 +53,7 @@ declare global {
       disconnectVpn: (username: string) => Promise<void>
       pingHost: (host: string) => Promise<PingResult>
       chooseGame: () => Promise<string | null>
-      launchGame: (gamePath: string) => Promise<void>
+      launchGame: (gamePath: string) => Promise<GameLaunchResult>
     }
   }
 }

@@ -74,6 +74,9 @@ function launchGameBound(gamePath, network) {
   const runtime = locateGameRuntime()
   if (!runtime) throw new Error('未找到 WEL 游戏网络组件，请安装最新完整客户端')
   const target = normalizeNetwork(network)
+  const warnings = target.interfaceIndex > 0
+    ? []
+    : ['未能确认 TAP 接口索引；广播改写已启用，但 WE8 UDP Socket 和房间单播只能依赖 Windows 路由。']
 
   return new Promise((resolve, reject) => {
     const child = spawn(runtime.launcher, [
@@ -98,7 +101,7 @@ function launchGameBound(gamePath, network) {
     child.once('close', (code) => {
       clearTimeout(timer)
       const detail = Buffer.concat(output).toString('utf8').trim()
-      if (code === 0 && /STARTED\s+pid=\d+/i.test(detail)) resolve(detail)
+      if (code === 0 && /STARTED\s+pid=\d+/i.test(detail)) resolve({ detail, warnings })
       else reject(new Error(`WE8 Socket 绑定失败（代码 ${formatProcessExitCode(code)}）${detail ? `：${detail}` : ''}`))
     })
   })

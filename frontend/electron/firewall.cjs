@@ -10,9 +10,16 @@ const ROOM_UDP_OUTBOUND_RULE = 'WEL room UDP outbound'
 const ROOM_ICMP_INBOUND_RULE = 'WEL room ICMPv4 inbound'
 const ROOM_ICMP_OUTBOUND_RULE = 'WEL room ICMPv4 outbound'
 const WEL_ROOM_FIREWALL_SUBNET_CIDR = '10.222.0.0/16'
-const FIREWALL_RULE_VERSION = 6
+const FIREWALL_RULE_VERSION = 7
+const ROOM_WARNING_BASE = 40
+const ROOM_UDP_WARNING = 1
+const ROOM_EDGE_WARNING = 2
+const ROOM_ICMP_WARNING = 4
+const WE8_BLOCK_REMAINS = 31
+const WE8_ALLOW_WARNING = 32
 
 let activeRoomFirewallKey = null
+let activeRoomFirewallResult = null
 
 function firewallHelperCandidates() {
   return [
@@ -30,7 +37,29 @@ function firewallHelperExitReason(code) {
   if (Number(code) === 11) return 'Windows 无法启动防火墙授权程序'
   if (Number(code) === 12) return 'Windows 防火墙规则写入失败'
   if (Number(code) === 21) return 'Windows 防火墙无法放行房间 UDP 入站流量'
+  if (Number(code) === WE8_BLOCK_REMAINS) return '当前 WE8.exe 仍存在有效的入站阻止规则'
+  if (Number(code) === WE8_ALLOW_WARNING) return 'Windows 未能创建 WE8.exe 入站允许规则'
   return `Windows 防火墙授权程序退出（代码 ${code ?? '未知'}）`
+}
+
+function firewallError(code, message) {
+  const error = new Error(message)
+  error.firewallCode = Number(code)
+  return error
+}
+
+function roomFirewallWarnings(error) {
+  const code = Number(error?.firewallCode)
+  const warnings = []
+  if (code >= ROOM_WARNING_BASE && code <= ROOM_WARNING_BASE + 7) {
+    const flags = code & 7
+    if (flags & ROOM_UDP_WARNING) warnings.push('房间 UDP 入站放行失败；开启防火墙时，可能影响搜索或连接。')
+    if (flags & ROOM_EDGE_WARNING) warnings.push('n2n 入站放行失败；可能降低 P2P 直连成功率，但仍会继续尝试中继连接。')
+    if (flags & ROOM_ICMP_WARNING) warnings.push('Ping 放行规则创建失败；对手可能无法 Ping 到你，但不影响进入房间。')
+    return warnings
+  }
+  if (code === 21) return ['房间 UDP 入站放行失败；开启防火墙时，可能影响搜索或连接。']
+  return [`防火墙规则未完全配置：${String(error?.message || '未知错误')}。仍将继续连接房间。`]
 }
 
 function firewallLogPath() {
@@ -78,7 +107,10 @@ async function runFirewallHelper(args) {
     await runProcess(helper, args, 45000)
   } catch (error) {
     const match = /退出代码\s+(-?\d+)/.exec(String(error?.message || ''))
-    if (match) throw new Error(`${firewallHelperExitReason(Number(match[1]))}\n防火墙日志：${firewallLogPath()}`)
+    if (match) {
+      const code = Number(match[1])
+      throw firewallError(code, `${firewallHelperExitReason(code)}\n防火墙日志：${firewallLogPath()}`)
+    }
     throw new Error(`Windows 防火墙授权失败：${error.message}`)
   }
   return true
@@ -86,9 +118,16 @@ async function runFirewallHelper(args) {
 
 async function ensureRoomFirewall(edgePath, subnetCidr = WEL_ROOM_FIREWALL_SUBNET_CIDR) {
   const key = `${String(edgePath || '').trim().toLowerCase()}|${WEL_ROOM_FIREWALL_SUBNET_CIDR}`
-  if (activeRoomFirewallKey === key) return true
-  const result = await runFirewallHelper(buildRoomFirewallArgs(edgePath, WEL_ROOM_FIREWALL_SUBNET_CIDR))
-  if (result) activeRoomFirewallKey = key
+  if (activeRoomFirewallKey === key && activeRoomFirewallResult) return activeRoomFirewallResult
+  let result
+  try {
+    await runFirewallHelper(buildRoomFirewallArgs(edgePath, WEL_ROOM_FIREWALL_SUBNET_CIDR))
+    result = { warnings: [] }
+  } catch (error) {
+    result = { warnings: roomFirewallWarnings(error) }
+  }
+  activeRoomFirewallKey = key
+  activeRoomFirewallResult = result
   return result
 }
 
@@ -101,7 +140,15 @@ async function ensureRoomUdpFirewall(subnetCidr, edgePath) {
 }
 
 async function ensureWe8Firewall(programPath) {
-  return runFirewallHelper(buildWe8FirewallArgs(programPath))
+  try {
+    await runFirewallHelper(buildWe8FirewallArgs(programPath))
+    return { warnings: [] }
+  } catch (error) {
+    if (Number(error?.firewallCode) === WE8_BLOCK_REMAINS) throw error
+    return {
+      warnings: [`WE8 防火墙放行未完成：${String(error?.message || '未知错误')}。游戏仍会启动。`],
+    }
+  }
 }
 
 module.exports = {
@@ -124,4 +171,5 @@ module.exports = {
   firewallHelperExitReason,
   firewallLogPath,
   locateFirewallHelper,
+  roomFirewallWarnings,
 }

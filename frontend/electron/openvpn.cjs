@@ -715,17 +715,25 @@ async function connect({ host, port, roomID, username, subnetCidr, virtualIP, co
   await stopStaleWelN2nProcesses()
   await wait(500)
   const prepared = await prepare()
-  const tapNode = prepared.tapNode
+  let tapNode = prepared.tapNode
   const transportBindIP = await findBestTransportIPv4(host || DEFAULT_HOST)
-  await ensureRoomFirewall(executable, subnetCidr)
+  const firewall = await ensureRoomFirewall(executable, subnetCidr)
 
   let lastError = null
   for (let attempt = 1; attempt <= CONNECT_MAX_ATTEMPTS; attempt += 1) {
     try {
-      return await connectAttempt({ executable, host, port, roomID, username, subnetCidr, virtualIP, community, transportKey, tapName: tapNode, transportBindIP })
+      const network = await connectAttempt({ executable, host, port, roomID, username, subnetCidr, virtualIP, community, transportKey, tapName: tapNode, transportBindIP })
+      const result = { ...network, warnings: firewall.warnings || [] }
+      if (connection) connection.network = result
+      return result
     } catch (error) {
       lastError = error
       if (attempt >= CONNECT_MAX_ATTEMPTS || !isRetryableConnectError(error)) throw error
+      if (/Cannot find tap device/i.test(String(error?.message || error || ''))) {
+        preparedTap = null
+        const refreshed = await prepare()
+        tapNode = refreshed.tapNode
+      }
       await wait(attempt * 1200)
     }
   }

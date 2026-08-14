@@ -69,6 +69,8 @@ test('does not generate OpenVPN client configuration while connecting', () => {
   assert.match(client, /'-e', transportBindIP/)
   assert.match(client, /'-d', tapName/)
   assert.match(client, /ensureRoomFirewall\(executable, subnetCidr\)/)
+  assert.match(client, /warnings: firewall\.warnings/)
+  assert.match(client, /Cannot find tap device[\s\S]*preparedTap = null/)
   assert.match(client, /connection\.network = inspectedNetwork/)
   assert.match(client, /function activeNetwork\(\)/)
   assert.doesNotMatch(client, /broadcast-route|game-broadcast|WinDivert/)

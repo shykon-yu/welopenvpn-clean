@@ -9,7 +9,12 @@
 #define WEL_FIREWALL_INVALID_ARGUMENTS 2
 #define WEL_FIREWALL_UAC_CANCELLED 10
 #define WEL_FIREWALL_ELEVATION_FAILED 11
-#define WEL_FIREWALL_UDP_IN_FAILED 21
+#define WEL_FIREWALL_ROOM_WARNING_BASE 40
+#define WEL_FIREWALL_ROOM_UDP_WARNING 1
+#define WEL_FIREWALL_ROOM_EDGE_WARNING 2
+#define WEL_FIREWALL_ROOM_ICMP_WARNING 4
+#define WEL_FIREWALL_WE8_BLOCK_REMAINS 31
+#define WEL_FIREWALL_WE8_ALLOW_WARNING 32
 
 typedef struct {
     const wchar_t *subnet;
@@ -65,6 +70,83 @@ static int valid_subnet(const wchar_t *value) {
         ++cursor;
     }
     return 1;
+}
+
+static const wchar_t *find_text_case_insensitive(const wchar_t *text, const wchar_t *needle) {
+    size_t needle_length;
+    const wchar_t *cursor;
+    if (text == NULL || needle == NULL || *needle == L'\0') return NULL;
+    needle_length = wcslen(needle);
+    for (cursor = text; *cursor != L'\0'; ++cursor) {
+        if (_wcsnicmp(cursor, needle, needle_length) == 0) return cursor;
+    }
+    return NULL;
+}
+
+static int rule_blocks_program(const wchar_t *rule, const wchar_t *program_path) {
+    const wchar_t *app_start;
+    const wchar_t *app_end;
+    wchar_t stored_path[MAX_PATH * 2];
+    wchar_t expanded_path[MAX_PATH * 2];
+    size_t stored_length;
+
+    if (rule == NULL || program_path == NULL) return 0;
+    if (find_text_case_insensitive(rule, L"|Action=Block|") == NULL ||
+        find_text_case_insensitive(rule, L"|Dir=In|") == NULL ||
+        find_text_case_insensitive(rule, L"|Active=TRUE|") == NULL) return 0;
+    app_start = find_text_case_insensitive(rule, L"|App=");
+    if (app_start == NULL) return 0;
+    app_start += 5;
+    app_end = wcschr(app_start, L'|');
+    stored_length = app_end == NULL ? wcslen(app_start) : (size_t)(app_end - app_start);
+    if (stored_length == 0 || stored_length >= ARRAYSIZE(stored_path)) return 0;
+    wmemcpy(stored_path, app_start, stored_length);
+    stored_path[stored_length] = L'\0';
+    {
+        DWORD expanded_length = ExpandEnvironmentStringsW(stored_path, expanded_path, ARRAYSIZE(expanded_path));
+        if (expanded_length == 0 || expanded_length > ARRAYSIZE(expanded_path)) {
+            wcscpy_s(expanded_path, ARRAYSIZE(expanded_path), stored_path);
+        }
+    }
+    return _wcsicmp(expanded_path, program_path) == 0;
+}
+
+static int registry_key_has_program_block(HKEY root, const wchar_t *key_path, const wchar_t *program_path) {
+    HKEY key;
+    DWORD index = 0;
+    LONG status;
+    if (RegOpenKeyExW(root, key_path, 0, KEY_READ, &key) != ERROR_SUCCESS) return 0;
+    for (;;) {
+        wchar_t value_name[512];
+        BYTE value_data[16384];
+        DWORD value_name_length = ARRAYSIZE(value_name);
+        DWORD value_data_length = sizeof(value_data) - sizeof(wchar_t);
+        DWORD value_type = 0;
+        status = RegEnumValueW(key, index++, value_name, &value_name_length, NULL,
+            &value_type, value_data, &value_data_length);
+        if (status == ERROR_NO_MORE_ITEMS) break;
+        if (status != ERROR_SUCCESS || (value_type != REG_SZ && value_type != REG_EXPAND_SZ)) continue;
+        value_data[value_data_length] = 0;
+        value_data[value_data_length + 1] = 0;
+        if (rule_blocks_program((const wchar_t *)value_data, program_path)) {
+            RegCloseKey(key);
+            return 1;
+        }
+    }
+    RegCloseKey(key);
+    return 0;
+}
+
+static int has_active_inbound_program_block(const wchar_t *program_path) {
+    const wchar_t *keys[] = {
+        L"SYSTEM\\CurrentControlSet\\Services\\SharedAccess\\Parameters\\FirewallPolicy\\FirewallRules",
+        L"SOFTWARE\\Policies\\Microsoft\\WindowsFirewall\\FirewallRules"
+    };
+    size_t index;
+    for (index = 0; index < ARRAYSIZE(keys); ++index) {
+        if (registry_key_has_program_block(HKEY_LOCAL_MACHINE, keys[index], program_path)) return 1;
+    }
+    return 0;
 }
 
 static int parse_options(int argc, wchar_t **argv, wel_firewall_options *options) {
@@ -186,6 +268,7 @@ static int add_udp_inbound_rule(const wchar_t *subnet) {
 
 static int add_room_rules(const wel_firewall_options *options) {
     wchar_t command[4096];
+    int warnings = 0;
     const wchar_t *remove_rules[] = {
         L"WEL game discovery UDP 5739 inbound",
         L"WEL room UDP inbound",
@@ -202,10 +285,7 @@ static int add_room_rules(const wel_firewall_options *options) {
         run_netsh(command);
     }
 
-    /* The subnet UDP rule is the required game transport rule. Install it
-       before optional per-program rules so old Win7 firewall stores cannot
-       prevent room entry merely by rejecting a program path. */
-    if (!add_udp_inbound_rule(options->subnet)) return WEL_FIREWALL_UDP_IN_FAILED;
+    if (!add_udp_inbound_rule(options->subnet)) warnings |= WEL_FIREWALL_ROOM_UDP_WARNING;
 
     _snwprintf_s(command, ARRAYSIZE(command), _TRUNCATE,
         L"advfirewall firewall add rule name=\"WEL n2n edge inbound\" dir=in action=allow program=\"%ls\" enable=yes profile=any",
@@ -214,24 +294,19 @@ static int add_room_rules(const wel_firewall_options *options) {
         _snwprintf_s(command, ARRAYSIZE(command), _TRUNCATE,
             L"firewall add allowedprogram program=\"%ls\" name=\"WEL n2n edge inbound\" mode=ENABLE scope=ALL profile=ALL",
             options->edge_path);
-        run_netsh(command);
+        if (!run_netsh(command)) warnings |= WEL_FIREWALL_ROOM_EDGE_WARNING;
     }
-
-    _snwprintf_s(command, ARRAYSIZE(command), _TRUNCATE,
-        L"advfirewall firewall add rule name=\"WEL room UDP outbound\" dir=out action=allow protocol=udp remoteip=%ls enable=yes profile=any",
-        options->subnet);
-    run_netsh(command);
 
     _snwprintf_s(command, ARRAYSIZE(command), _TRUNCATE,
         L"advfirewall firewall add rule name=\"WEL room ICMPv4 inbound\" dir=in action=allow protocol=icmpv4:any,any remoteip=%ls enable=yes profile=any",
         options->subnet);
-    run_netsh(command);
+    if (!run_netsh(command)) warnings |= WEL_FIREWALL_ROOM_ICMP_WARNING;
 
     _snwprintf_s(command, ARRAYSIZE(command), _TRUNCATE,
         L"advfirewall firewall add rule name=\"WEL room ICMPv4 outbound\" dir=out action=allow protocol=icmpv4:any,any remoteip=%ls enable=yes profile=any",
         options->subnet);
-    run_netsh(command);
-    return WEL_FIREWALL_SUCCESS;
+    if (!run_netsh(command)) warnings |= WEL_FIREWALL_ROOM_ICMP_WARNING;
+    return warnings == 0 ? WEL_FIREWALL_SUCCESS : WEL_FIREWALL_ROOM_WARNING_BASE | warnings;
 }
 
 static int add_game_rule(const wel_firewall_options *options) {
@@ -244,6 +319,7 @@ static int add_game_rule(const wel_firewall_options *options) {
     _snwprintf_s(command, ARRAYSIZE(command), _TRUNCATE,
         L"advfirewall firewall delete rule name=all dir=in program=\"%ls\"", options->game_path);
     run_netsh(command);
+    if (has_active_inbound_program_block(options->game_path)) return WEL_FIREWALL_WE8_BLOCK_REMAINS;
 
     _snwprintf_s(command, ARRAYSIZE(command), _TRUNCATE,
         L"advfirewall firewall add rule name=\"WEL WE8 inbound\" dir=in action=allow program=\"%ls\" protocol=any enable=yes profile=any",
@@ -252,12 +328,8 @@ static int add_game_rule(const wel_firewall_options *options) {
         _snwprintf_s(command, ARRAYSIZE(command), _TRUNCATE,
             L"firewall add allowedprogram program=\"%ls\" name=\"WEL WE8 inbound\" mode=ENABLE scope=ALL profile=ALL",
             options->game_path);
-        run_netsh(command);
+        if (!run_netsh(command)) return WEL_FIREWALL_WE8_ALLOW_WARNING;
     }
-
-    /* The room-wide UDP rule already covers WE8 traffic. A machine that
-       rejects both per-program syntaxes must still be allowed to start the
-       game instead of being trapped before the socket hook can run. */
     return WEL_FIREWALL_SUCCESS;
 }
 
@@ -275,6 +347,8 @@ static int elevate_self(const wel_firewall_options *options) {
     wchar_t parameters[4096];
     SHELLEXECUTEINFOW execute;
     DWORD exit_code = WEL_FIREWALL_ELEVATION_FAILED;
+    int game_block_exists = options->game_path != NULL &&
+        has_active_inbound_program_block(options->game_path);
 
     if (GetModuleFileNameW(NULL, executable, ARRAYSIZE(executable)) == 0) return WEL_FIREWALL_ELEVATION_FAILED;
     if (options->game_path != NULL && options->subnet != NULL && options->edge_path != NULL) {
@@ -299,12 +373,15 @@ static int elevate_self(const wel_firewall_options *options) {
     execute.lpParameters = parameters;
     execute.nShow = SW_HIDE;
     if (!ShellExecuteExW(&execute)) {
+        if (game_block_exists) return WEL_FIREWALL_WE8_BLOCK_REMAINS;
         return GetLastError() == ERROR_CANCELLED ? WEL_FIREWALL_UAC_CANCELLED : WEL_FIREWALL_ELEVATION_FAILED;
     }
-    if (execute.hProcess == NULL) return WEL_FIREWALL_ELEVATION_FAILED;
+    if (execute.hProcess == NULL) {
+        return game_block_exists ? WEL_FIREWALL_WE8_BLOCK_REMAINS : WEL_FIREWALL_ELEVATION_FAILED;
+    }
     if (WaitForSingleObject(execute.hProcess, 30000) != WAIT_OBJECT_0) {
         CloseHandle(execute.hProcess);
-        return WEL_FIREWALL_ELEVATION_FAILED;
+        return game_block_exists ? WEL_FIREWALL_WE8_BLOCK_REMAINS : WEL_FIREWALL_ELEVATION_FAILED;
     }
     GetExitCodeProcess(execute.hProcess, &exit_code);
     CloseHandle(execute.hProcess);

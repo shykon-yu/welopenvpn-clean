@@ -179,9 +179,14 @@ ipcMain.handle('launch-game', async (_event, gamePath) => {
   const executable = resolveGameExecutable(gamePath)
   const network = openvpn.activeNetwork()
   if (!network?.connected) throw new Error('请先进入房间并等待 WEL TAP 网卡连接完成')
-  await ensureWe8Firewall(executable)
-  const result = await launchGameBound(executable, network)
-  writeLog(`WE8 已通过 TAP Socket 绑定启动：${result}`)
+  const firewall = await ensureWe8Firewall(executable)
+  const launch = await launchGameBound(executable, network)
+  writeLog(`WE8 已通过房间广播 Hook 启动：${launch.detail}`)
+  return {
+    started: true,
+    detail: launch.detail,
+    warnings: [...(firewall.warnings || []), ...(launch.warnings || [])],
+  }
 })
 
 process.on('uncaughtException', (error) => showFatalError(error))
