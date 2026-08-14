@@ -5,6 +5,8 @@
 #include <shellapi.h>
 #include <wchar.h>
 
+#pragma comment(lib, "Advapi32.lib")
+
 #define WEL_FIREWALL_SUCCESS 0
 #define WEL_FIREWALL_INVALID_ARGUMENTS 2
 #define WEL_FIREWALL_UAC_CANCELLED 10
