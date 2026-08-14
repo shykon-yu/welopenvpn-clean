@@ -29,7 +29,7 @@ test('passes room and exact WE8 paths to the native firewall helper', () => {
   assert.throws(() => buildRoomFirewallArgs('', '10.222.1.0/24'), /组件路径为空/)
   assert.throws(() => buildWe8FirewallArgs(''), /程序路径为空/)
   assert.equal(WEL_ROOM_FIREWALL_SUBNET_CIDR, '10.222.0.0/16')
-  assert.equal(FIREWALL_RULE_VERSION, 7)
+  assert.equal(FIREWALL_RULE_VERSION, 8)
 })
 
 test('uses the bundled native helper without requiring PowerShell', () => {
@@ -42,7 +42,7 @@ test('uses the bundled native helper without requiring PowerShell', () => {
   assert.match(firewallHelperExitReason(31), /阻止规则/)
   assert.match(firewallHelperExitReason(32), /允许规则/)
   assert.match(firewallLogPath(), /WELPlatform[/\\]logs[/\\]firewall\.log$/)
-  assert.match(source, /buildRoomFirewallArgs\(edgePath, WEL_ROOM_FIREWALL_SUBNET_CIDR\)/)
+  assert.match(source, /buildRoomFirewallArgs\(edgePath, normalizedSubnetCidr\)/)
 })
 
 test('classifies room firewall failures as actionable warnings', () => {
@@ -74,6 +74,8 @@ test('native helper repairs exact-path WE8 blocks and reports optional rule warn
   assert.match(source, /WEL_FIREWALL_ROOM_WARNING_BASE/)
   assert.match(source, /append_netsh_log/)
   assert.match(source, /firewall\.log/)
+  assert.match(source, /has_active_inbound_allow_rule/)
+  assert.match(source, /rule_is_active_inbound_allow/)
   assert.match(source, /dotted_subnet_to_cidr/)
   assert.match(source, /10\.222\.0\.0\/255\.255\.0\.0/)
   assert.match(source, /10\.222\.0\.0\/16/)

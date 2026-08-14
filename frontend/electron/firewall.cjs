@@ -10,7 +10,8 @@ const ROOM_UDP_OUTBOUND_RULE = 'WEL room UDP outbound'
 const ROOM_ICMP_INBOUND_RULE = 'WEL room ICMPv4 inbound'
 const ROOM_ICMP_OUTBOUND_RULE = 'WEL room ICMPv4 outbound'
 const WEL_ROOM_FIREWALL_SUBNET_CIDR = '10.222.0.0/16'
-const FIREWALL_RULE_VERSION = 7
+const FIREWALL_RULE_VERSION = 8
+const FIREWALL_WARNING_RETRY_COOLDOWN_MS = 30000
 const ROOM_WARNING_BASE = 40
 const ROOM_UDP_WARNING = 1
 const ROOM_EDGE_WARNING = 2
@@ -20,6 +21,7 @@ const WE8_ALLOW_WARNING = 32
 
 let activeRoomFirewallKey = null
 let activeRoomFirewallResult = null
+let activeRoomFirewallAttemptAt = 0
 
 function firewallHelperCandidates() {
   return [
@@ -117,17 +119,23 @@ async function runFirewallHelper(args) {
 }
 
 async function ensureRoomFirewall(edgePath, subnetCidr = WEL_ROOM_FIREWALL_SUBNET_CIDR) {
-  const key = `${String(edgePath || '').trim().toLowerCase()}|${WEL_ROOM_FIREWALL_SUBNET_CIDR}`
-  if (activeRoomFirewallKey === key && activeRoomFirewallResult) return activeRoomFirewallResult
+  const normalizedSubnetCidr = String(subnetCidr || WEL_ROOM_FIREWALL_SUBNET_CIDR).trim()
+  const key = `${String(edgePath || '').trim().toLowerCase()}|${normalizedSubnetCidr}`
+  const hasWarnings = Boolean(activeRoomFirewallResult?.warnings?.length)
+  const warningCacheIsFresh = Date.now() - activeRoomFirewallAttemptAt < FIREWALL_WARNING_RETRY_COOLDOWN_MS
+  if (activeRoomFirewallKey === key && activeRoomFirewallResult && (!hasWarnings || warningCacheIsFresh)) {
+    return activeRoomFirewallResult
+  }
   let result
   try {
-    await runFirewallHelper(buildRoomFirewallArgs(edgePath, WEL_ROOM_FIREWALL_SUBNET_CIDR))
+    await runFirewallHelper(buildRoomFirewallArgs(edgePath, normalizedSubnetCidr))
     result = { warnings: [] }
   } catch (error) {
     result = { warnings: roomFirewallWarnings(error) }
   }
   activeRoomFirewallKey = key
   activeRoomFirewallResult = result
+  activeRoomFirewallAttemptAt = Date.now()
   return result
 }
 

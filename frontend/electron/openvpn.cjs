@@ -197,13 +197,24 @@ function rememberTapAdapter(adapter) {
 
 async function ensureTapReady(adapter) {
   const enabledAdapter = await ensureTapEnabled(adapter)
+  if (!enabledAdapter) return null
   rememberTapAdapter(enabledAdapter)
   preparedTap = { tapName: enabledAdapter.name, tapNode: enabledAdapter.guid, tapGuid: enabledAdapter.guid }
   return preparedTap
 }
 
-function selectWelTapAdapter(adapters) {
-  return (adapters || []).find(({ guid }) => Boolean(parseTapGuid(guid))) || null
+function selectWelTapAdapter(adapters, excludedGuids = new Set()) {
+  const candidates = (adapters || []).filter(({ guid }) => {
+    const normalized = parseTapGuid(guid)
+    return Boolean(normalized) && !excludedGuids.has(normalized)
+  })
+  const owned = candidates.filter(({ name }) => isWelTapAdapter(name))
+  return owned.find(({ name }) => name.toLowerCase() === TAP_NAME.toLowerCase())
+    || owned.find(({ name }) => /^WEL (?:Virtual LAN|TAP)(?: \d+)?$/i.test(name))
+    || owned.find(({ name }) => /^(?:以太网|本地连接)(?: \d+| #\d+)?$/i.test(name))
+    || owned[0]
+    || candidates[0]
+    || null
 }
 
 function runTapctl(executable, args, timeoutMs = 10000) {
@@ -237,7 +248,8 @@ async function listTapAdapters(tapctl) {
     // Win7 can have a healthy TAP driver while tapctl cannot enumerate it.
   }
   try {
-    return await listTapAdaptersFromRegistry()
+    const adapters = await listTapAdaptersFromRegistry()
+    if (adapters.length > 0) return adapters
   } catch {
     // Restricted Windows policies can deny access to the adapter class key.
   }
@@ -289,27 +301,33 @@ async function ensureTapEnabled(adapter) {
   const guid = adapter.guid
   const bareGuid = guid.replace(/[{}]/g, '')
   try {
-    await runPowerShell(`
+    const state = await runPowerShell(`
 $guid = '${bareGuid}'
 $adapter = Get-WmiObject Win32_NetworkAdapter -ErrorAction SilentlyContinue |
   Where-Object { $_.GUID -and $_.GUID.Trim('{}') -ieq $guid } |
   Select-Object -First 1
-if ($null -eq $adapter) { exit 2 }
+if ($null -eq $adapter) { [Console]::Out.WriteLine('MISSING'); exit 0 }
+$errorCode = 0
+try { $errorCode = [int]$adapter.ConfigManagerErrorCode } catch {}
+if ($errorCode -ne 0) { [Console]::Out.WriteLine('ERROR'); exit 0 }
 $enabled = $adapter.NetEnabled
 if ($enabled -ne $true) {
   $result = $adapter.Enable()
   $returnValue = [int]$result.ReturnValue
-  if (@(0, 1) -notcontains $returnValue) { exit 4 }
+  if (@(0, 1) -notcontains $returnValue) { [Console]::Out.WriteLine('ERROR'); exit 0 }
   Start-Sleep -Milliseconds 500
 }
+[Console]::Out.WriteLine('READY')
 `, 6000)
-    return adapter
+    return /(^|\r?\n)READY(\r?\n|$)/.test(state) ? adapter : null
   } catch {
-    return adapter
+    // A failed health query is not proof that the GUID is usable. Let the
+    // caller try another TAP candidate instead of handing a broken device to n2n.
+    return null
   }
 }
 
-async function prepare() {
+async function prepare(excludedGuids = new Set(), repairState = { freshCreated: false }) {
   const current = status()
   if (!current.ready) throw new Error(current.message)
   if (process.platform !== 'win32') return current
@@ -321,12 +339,45 @@ async function prepare() {
   if (!tapctl) throw new Error('未检测到 WEL 虚拟网卡管理组件，请重新安装客户端')
 
   let adapters = await listTapAdapters(tapctl)
+  const existingTapGuids = new Set(adapters.map(({ guid }) => parseTapGuid(guid)).filter(Boolean))
   const rememberedGuid = readRememberedTapGuid()
-  const adapter = (rememberedGuid
-    ? adapters.find(({ guid }) => guid.toLowerCase() === rememberedGuid)
-    : null) || selectWelTapAdapter(adapters)
-  if (adapter) {
-    return { ...current, adapterReady: true, ...(await ensureTapReady(adapter)) }
+  const orderedAdapters = []
+  const rememberedAdapter = rememberedGuid
+    ? adapters.find(({ guid }) => guid.toLowerCase() === rememberedGuid && !excludedGuids.has(rememberedGuid))
+    : null
+  if (rememberedAdapter) orderedAdapters.push(rememberedAdapter)
+  const preferredAdapter = selectWelTapAdapter(adapters, excludedGuids)
+  if (preferredAdapter && !orderedAdapters.some(({ guid }) => guid.toLowerCase() === preferredAdapter.guid.toLowerCase())) {
+    orderedAdapters.push(preferredAdapter)
+  }
+  for (const adapter of adapters) {
+    if (!excludedGuids.has(adapter.guid.toLowerCase()) &&
+        !orderedAdapters.some(({ guid }) => guid.toLowerCase() === adapter.guid.toLowerCase())) {
+      orderedAdapters.push(adapter)
+    }
+  }
+  for (const adapter of orderedAdapters) {
+    const prepared = await ensureTapReady(adapter)
+    if (prepared) return { ...current, adapterReady: true, ...prepared }
+  }
+
+  // A device that was enumerated but cannot be opened is not repaired by
+  // reinstalling the whole driver. Create one fresh TAP adapter and leave
+  // every existing adapter untouched. Limit this repair to once per run so a
+  // persistent driver failure cannot create an unbounded number of adapters.
+  if (excludedGuids.size > 0 || existingTapGuids.size > 0) {
+    if (repairState.freshCreated) {
+      throw new Error('TAP 网卡已存在，但当前设备无法被 n2n 打开；请在设备管理器中修复 TAP-Windows 驱动')
+    }
+    repairState.freshCreated = true
+    const knownGuids = new Set([...existingTapGuids, ...excludedGuids])
+    try { await runTapctl(tapctl, ['create', '--hwid', 'tap0901']) } catch {}
+    const freshAdapter = await waitForNewTapAdapter(tapctl, knownGuids)
+    if (freshAdapter) {
+      const prepared = await ensureTapReady(freshAdapter)
+      if (prepared) return { ...current, adapterReady: true, ...prepared }
+    }
+    throw new Error('检测到 TAP 网卡，但所有设备实例均不可用；请在设备管理器中修复 TAP-Windows 驱动')
   }
 
   const installer = locateTapInstaller()
@@ -334,14 +385,16 @@ async function prepare() {
 
   await installBundledTapDriver(installer)
   adapters = await waitForTapAdapter(tapctl)
-  let installedAdapter = selectWelTapAdapter(adapters)
+  let installedAdapter = selectWelTapAdapter(adapters, excludedGuids)
   if (!installedAdapter) {
     await runTapctl(tapctl, ['create', '--hwid', 'tap0901'])
     adapters = await waitForTapAdapter(tapctl)
-    installedAdapter = selectWelTapAdapter(adapters)
+    installedAdapter = selectWelTapAdapter(adapters, excludedGuids)
   }
   if (!installedAdapter) throw new Error('TAP 虚拟网卡驱动安装后仍未检测到网卡，请重启 Windows 后重试')
-  return { ...current, adapterReady: true, ...(await ensureTapReady(installedAdapter)) }
+  const installed = await ensureTapReady(installedAdapter)
+  if (!installed) throw new Error('检测到 TAP 网卡，但驱动设备状态异常，请在设备管理器中修复 TAP-Windows 驱动')
+  return { ...current, adapterReady: true, ...installed }
 }
 
 function installBundledTapDriver(installer) {
@@ -363,6 +416,17 @@ async function waitForTapAdapter(tapctl) {
     await wait(500)
   }
   return []
+}
+
+async function waitForNewTapAdapter(tapctl, knownGuids) {
+  const deadline = Date.now() + 15000
+  while (Date.now() < deadline) {
+    const adapters = await listTapAdapters(tapctl)
+    const created = adapters.find(({ guid }) => !knownGuids.has(parseTapGuid(guid)))
+    if (created) return created
+    await wait(500)
+  }
+  return null
 }
 
 function safeFilePart(value) {
@@ -714,7 +778,9 @@ async function connect({ host, port, roomID, username, subnetCidr, virtualIP, co
   await stopConnection()
   await stopStaleWelN2nProcesses()
   await wait(500)
-  const prepared = await prepare()
+  const failedTapGuids = new Set()
+  const tapRepairState = { freshCreated: false }
+  const prepared = await prepare(failedTapGuids, tapRepairState)
   let tapNode = prepared.tapNode
   const transportBindIP = await findBestTransportIPv4(host || DEFAULT_HOST)
   const firewall = await ensureRoomFirewall(executable, subnetCidr)
@@ -730,8 +796,10 @@ async function connect({ host, port, roomID, username, subnetCidr, virtualIP, co
       lastError = error
       if (attempt >= CONNECT_MAX_ATTEMPTS || !isRetryableConnectError(error)) throw error
       if (/Cannot find tap device/i.test(String(error?.message || error || ''))) {
+        const failedGuid = parseTapGuid(tapNode)
+        if (failedGuid) failedTapGuids.add(failedGuid)
         preparedTap = null
-        const refreshed = await prepare()
+        const refreshed = await prepare(failedTapGuids, tapRepairState)
         tapNode = refreshed.tapNode
       }
       await wait(attempt * 1200)

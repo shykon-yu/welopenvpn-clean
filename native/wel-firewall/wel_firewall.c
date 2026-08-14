@@ -139,6 +139,59 @@ static int registry_key_has_program_block(HKEY root, const wchar_t *key_path, co
     return 0;
 }
 
+static int rule_is_active_inbound_allow(const wchar_t *rule, const wchar_t *rule_name) {
+    wchar_t name_marker[512];
+
+    if (rule == NULL || rule_name == NULL || *rule_name == L'\0') return 0;
+    if (_snwprintf_s(name_marker, ARRAYSIZE(name_marker), _TRUNCATE,
+        L"|Name=%ls|", rule_name) < 0) return 0;
+    return find_text_case_insensitive(rule, name_marker) != NULL &&
+        find_text_case_insensitive(rule, L"|Action=Allow|") != NULL &&
+        find_text_case_insensitive(rule, L"|Dir=In|") != NULL &&
+        find_text_case_insensitive(rule, L"|Active=TRUE|") != NULL;
+}
+
+static int registry_key_has_active_inbound_allow(HKEY root, const wchar_t *key_path, const wchar_t *rule_name) {
+    HKEY key;
+    DWORD index = 0;
+    LONG status;
+
+    if (RegOpenKeyExW(root, key_path, 0, KEY_READ, &key) != ERROR_SUCCESS) return 0;
+    for (;;) {
+        wchar_t value_name[512];
+        BYTE value_data[16384];
+        DWORD value_name_length = ARRAYSIZE(value_name);
+        DWORD value_data_length = sizeof(value_data) - sizeof(wchar_t);
+        DWORD value_type = 0;
+
+        status = RegEnumValueW(key, index++, value_name, &value_name_length, NULL,
+            &value_type, value_data, &value_data_length);
+        if (status == ERROR_NO_MORE_ITEMS) break;
+        if (status != ERROR_SUCCESS || (value_type != REG_SZ && value_type != REG_EXPAND_SZ)) continue;
+        value_data[value_data_length] = 0;
+        value_data[value_data_length + 1] = 0;
+        if (rule_is_active_inbound_allow((const wchar_t *)value_data, rule_name)) {
+            RegCloseKey(key);
+            return 1;
+        }
+    }
+    RegCloseKey(key);
+    return 0;
+}
+
+static int has_active_inbound_allow_rule(const wchar_t *rule_name) {
+    const wchar_t *keys[] = {
+        L"SYSTEM\\CurrentControlSet\\Services\\SharedAccess\\Parameters\\FirewallPolicy\\FirewallRules",
+        L"SOFTWARE\\Policies\\Microsoft\\WindowsFirewall\\FirewallRules"
+    };
+    size_t index;
+
+    for (index = 0; index < ARRAYSIZE(keys); ++index) {
+        if (registry_key_has_active_inbound_allow(HKEY_LOCAL_MACHINE, keys[index], rule_name)) return 1;
+    }
+    return 0;
+}
+
 static int has_active_inbound_program_block(const wchar_t *program_path) {
     const wchar_t *keys[] = {
         L"SYSTEM\\CurrentControlSet\\Services\\SharedAccess\\Parameters\\FirewallPolicy\\FirewallRules",
@@ -287,7 +340,10 @@ static int add_room_rules(const wel_firewall_options *options) {
         run_netsh(command);
     }
 
-    if (!add_udp_inbound_rule(options->subnet)) warnings |= WEL_FIREWALL_ROOM_UDP_WARNING;
+    if (!add_udp_inbound_rule(options->subnet) ||
+        !has_active_inbound_allow_rule(L"WEL room UDP inbound")) {
+        warnings |= WEL_FIREWALL_ROOM_UDP_WARNING;
+    }
 
     _snwprintf_s(command, ARRAYSIZE(command), _TRUNCATE,
         L"advfirewall firewall add rule name=\"WEL n2n edge inbound\" dir=in action=allow program=\"%ls\" enable=yes profile=any",
@@ -298,11 +354,16 @@ static int add_room_rules(const wel_firewall_options *options) {
             options->edge_path);
         if (!run_netsh(command)) warnings |= WEL_FIREWALL_ROOM_EDGE_WARNING;
     }
+    if (!has_active_inbound_allow_rule(L"WEL n2n edge inbound")) {
+        warnings |= WEL_FIREWALL_ROOM_EDGE_WARNING;
+    }
 
     _snwprintf_s(command, ARRAYSIZE(command), _TRUNCATE,
         L"advfirewall firewall add rule name=\"WEL room ICMPv4 inbound\" dir=in action=allow protocol=icmpv4:any,any remoteip=%ls enable=yes profile=any",
         options->subnet);
-    if (!run_netsh(command)) warnings |= WEL_FIREWALL_ROOM_ICMP_WARNING;
+    if (!run_netsh(command) || !has_active_inbound_allow_rule(L"WEL room ICMPv4 inbound")) {
+        warnings |= WEL_FIREWALL_ROOM_ICMP_WARNING;
+    }
 
     _snwprintf_s(command, ARRAYSIZE(command), _TRUNCATE,
         L"advfirewall firewall add rule name=\"WEL room ICMPv4 outbound\" dir=out action=allow protocol=icmpv4:any,any remoteip=%ls enable=yes profile=any",
@@ -332,6 +393,7 @@ static int add_game_rule(const wel_firewall_options *options) {
             options->game_path);
         if (!run_netsh(command)) return WEL_FIREWALL_WE8_ALLOW_WARNING;
     }
+    if (!has_active_inbound_allow_rule(L"WEL WE8 inbound")) return WEL_FIREWALL_WE8_ALLOW_WARNING;
     return WEL_FIREWALL_SUCCESS;
 }
 
